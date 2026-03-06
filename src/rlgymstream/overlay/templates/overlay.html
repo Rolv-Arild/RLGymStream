@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>RLGymStream</title>
+    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <style>
+        /* Badge cards for live in-game display */
+        .badge-card {
+            background: rgba(10, 10, 20, 0.75);
+            border-radius: 10px;
+            padding: 12px 20px;
+            min-width: 140px;
+        }
+        .badge-card.blue   { border-left: 3px solid #3b82f6; }
+        .badge-card.orange { border-right: 3px solid #f97316; text-align: right; }
+        .badge-name { font-size: 20px; font-weight: 600; color: #f0f0f0; font-family: 'Rajdhani', sans-serif; }
+        .badge-mmr { font-family: 'Orbitron', sans-serif; font-size: 28px; color: #fbbf24; line-height: 1; }
+        .badge-mmr-label { font-size: 10px; color: #8a8a9a; letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
+        .badge-count { font-size: 14px; color: #8a8a9a; font-weight: 400; }
+    </style>
+</head>
+<body>
+<!--
+  Single 1920×1080 OBS Browser Source overlay.
+  - pregame:  full-screen bot showcase (descriptions, fun facts, MMR, H2H, leaderboard)
+  - live:     minimal badges in top-left/top-right (avoids game UI)
+  - postgame: nothing (game shows its own scoreboard)
+  - idle:     leaderboard between matches
+-->
+<div id="overlay">
+    <!-- pre-match: full-screen showcase -->
+    <div id="pregame" class="phase-layer" style="display:none"></div>
+
+    <!-- live: blue bots stacked on left, orange bots stacked on right -->
+    <div id="live-blue" style="display:none; position:absolute; top:16px; left:16px; flex-direction:column; gap:8px; z-index:10;"></div>
+    <div id="live-orange" style="display:none; position:absolute; top:16px; right:16px; flex-direction:column; gap:8px; z-index:10;"></div>
+
+    <!-- idle: leaderboard display between matches -->
+    <div id="idle-leaderboard" class="phase-layer" style="display:none"></div>
+</div>
+
+<script src="/static/overlay.js?v=3"></script>
+<script>
+window.renderState = function(state) {
+    const m = state.match;
+    const pregameEl    = document.getElementById("pregame");
+    const liveBlueEl   = document.getElementById("live-blue");
+    const liveOrangeEl = document.getElementById("live-orange");
+    const idleLbEl     = document.getElementById("idle-leaderboard");
+
+    // Hide all layers first
+    pregameEl.style.display    = "none";
+    liveBlueEl.style.display   = "none";
+    liveOrangeEl.style.display = "none";
+    idleLbEl.style.display     = "none";
+
+    if (m.phase === "pregame") {
+        pregameEl.style.display = "flex";
+        renderPregame(m, state, pregameEl);
+    } else if (m.phase === "countdown" || m.phase === "live" || m.phase === "replay") {
+        // "flex" activates the flex-direction:column from the inline style
+        liveBlueEl.style.display   = "flex";
+        liveOrangeEl.style.display = "flex";
+        renderLiveBadges(m);
+    } else if (m.phase === "idle" || m.phase === "postgame") {
+        const boards = state.leaderboards || {};
+        if (Object.keys(boards).length > 0) {
+            idleLbEl.style.display = "flex";
+            renderIdleLeaderboard(state, idleLbEl);
+        }
+    }
+};
+
+/* ══════════════════════════════════════════════════════════════
+   PRE-GAME — full showcase
+   ══════════════════════════════════════════════════════════════ */
+function renderPregame(m, state, el) {
+    const h2h = state.head_to_head || {};
+    const boards = state.leaderboards || {};
+    const modeBoard = boards[m.mode] || [];
+
+    // Build bot showcase cards
+    const blueCards = m.team_blue.map(b => botShowcase(b, "blue")).join("");
+    const orangeCards = m.team_orange.map(b => botShowcase(b, "orange")).join("");
+
+    // H2H section (only for 1v1 with history)
+    let h2hHtml = "";
+    if (h2h.total > 0 && m.team_blue.length === 1 && m.team_orange.length === 1) {
+        const wa = h2h.wins_a || 0, wb = h2h.wins_b || 0, d = h2h.draws || 0;
+        const total = h2h.total;
+        const pA = (wa/total*100).toFixed(0), pD = (d/total*100).toFixed(0), pB = (wb/total*100).toFixed(0);
+        h2hHtml = `
+        <div class="pre-h2h">
+            <div class="pre-h2h-title">Head to Head — ${total} meetings</div>
+            <div class="pre-h2h-bar">
+                ${wa > 0 ? `<div class="h2h-seg blue" style="width:${pA}%">${wa}W</div>` : ""}
+                ${d > 0 ? `<div class="h2h-seg draw" style="width:${pD}%">${d}D</div>` : ""}
+                ${wb > 0 ? `<div class="h2h-seg orange" style="width:${pB}%">${wb}W</div>` : ""}
+            </div>
+        </div>`;
+    } else if (m.team_blue.length === 1 && m.team_orange.length === 1 && h2h.bot_a_name) {
+        h2hHtml = `<div class="pre-h2h"><div class="pre-h2h-title">First meeting!</div></div>`;
+    }
+
+    // Leaderboard (top 8)
+    let lbHtml = "";
+    if (modeBoard.length > 0) {
+        const rows = modeBoard.slice(0, 8).map((e, i) => {
+            const r = i + 1;
+            const rc = rankClass(r);
+            return `<div class="pre-lb-row">
+                <span class="pre-lb-rank ${rc}">#${r}</span>
+                <span class="pre-lb-name">${escapeHtml(e.bot_name)}</span>
+                <span class="pre-lb-mmr">${formatMMR(e.mmr)}</span>
+            </div>`;
+        }).join("");
+        lbHtml = `
+        <div class="pre-leaderboard">
+            <div class="pre-lb-title">${escapeHtml(m.mode_display)} Leaderboard</div>
+            ${rows}
+        </div>`;
+    }
+
+    el.innerHTML = `
+        <div class="pre-container">
+            <div class="pre-header">
+                <div class="pre-mode">${escapeHtml(m.mode_display)}</div>
+                <div class="pre-map">${escapeHtml(m.map_name)}</div>
+                <div class="pre-match-num">Match #${m.match_number}</div>
+            </div>
+            <div class="pre-teams">
+                <div class="pre-team blue">
+                    <div class="pre-team-label">BLUE</div>
+                    ${blueCards}
+                </div>
+                <div class="pre-vs">VS</div>
+                <div class="pre-team orange">
+                    <div class="pre-team-label">ORANGE</div>
+                    ${orangeCards}
+                </div>
+            </div>
+            ${h2hHtml}
+            ${lbHtml}
+            <div class="pre-disclaimer">Bot MMR — does not reflect actual in-game rank</div>
+        </div>`;
+}
+
+function botShowcase(bot, team) {
+    const desc = bot.description || "";
+    const fact = bot.fun_fact ? `<div class="pre-bot-fact">💡 ${escapeHtml(bot.fun_fact)}</div>` : "";
+    const lang = bot.language ? `<span class="pre-bot-lang">${escapeHtml(bot.language)}</span>` : "";
+    const games = bot.matches_played === 1 ? "1 game" : `${bot.matches_played} games`;
+    const logo = bot.logo_path
+        ? `<img class="pre-bot-logo" src="/api/logo/${bot.id}" alt="">`
+        : "";
+    return `<div class="pre-bot ${team}">
+        ${logo}
+        <div class="pre-bot-content">
+            <div class="pre-bot-header">
+                <div>
+                    <div class="pre-bot-name">${escapeHtml(bot.name)}</div>
+                    <div class="pre-bot-author">by ${escapeHtml(bot.author || "Unknown")} ${lang}</div>
+                </div>
+                <div class="pre-bot-mmr-box">
+                    <div class="pre-bot-mmr">${formatMMR(bot.mmr)}</div>
+                    <div class="pre-bot-mmr-sub">MMR · ${games}</div>
+                </div>
+            </div>
+            ${desc ? `<div class="pre-bot-desc">${escapeHtml(desc)}</div>` : ""}
+            ${fact}
+        </div>
+    </div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   LIVE — tiny corner badges (avoid game UI)
+   ══════════════════════════════════════════════════════════════ */
+function renderLiveBadges(m) {
+    const blueEl = document.getElementById("live-blue");
+    const orangeEl = document.getElementById("live-orange");
+    blueEl.innerHTML = buildBadgeCards(m.team_blue, "blue");
+    orangeEl.innerHTML = buildBadgeCards(m.team_orange, "orange");
+}
+
+function buildBadgeCards(team, teamClass) {
+    // Group duplicate bots (same name) into "BotName ×N"
+    const grouped = [];
+    const seen = {};
+    for (const b of team) {
+        if (seen[b.name]) { seen[b.name].count++; }
+        else { seen[b.name] = { bot: b, count: 1 }; grouped.push(seen[b.name]); }
+    }
+    return grouped.map(g => {
+        const b = g.bot;
+        const suffix = g.count > 1 ? ` <span class="badge-count">×${g.count}</span>` : "";
+        return `<div class="badge-card ${teamClass}">
+            <div class="badge-name">${escapeHtml(b.name)}${suffix}</div>
+            <div class="badge-mmr">${formatMMR(b.mmr)}</div>
+            <div class="badge-mmr-label">MMR</div>
+        </div>`;
+    }).join("");
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   IDLE — full-screen leaderboard between matches
+   ══════════════════════════════════════════════════════════════ */
+let _lbModeIdx = 0;
+let _lbRotateTimer = null;
+
+function renderIdleLeaderboard(state, el) {
+    const boards = state.leaderboards || {};
+    const modes = Object.keys(boards);
+    if (modes.length === 0) { el.innerHTML = ""; return; }
+
+    // Auto-rotate mode every 8 seconds
+    if (!_lbRotateTimer) {
+        _lbRotateTimer = setInterval(() => {
+            _lbModeIdx++;
+            const s = window.getOverlayState();
+            if (s && s.match.phase === "idle") {
+                const idleLbEl = document.getElementById("idle-leaderboard");
+                if (idleLbEl) renderIdleLeaderboard(s, idleLbEl);
+            }
+        }, 8000);
+    }
+
+    const modeKey = modes[_lbModeIdx % modes.length];
+    const entries = boards[modeKey] || [];
+    const modeLabels = {
+        "1v1": "1v1", "2v2": "2v2", "3v3": "3v3",
+        "solo_2v2": "Solo 2v2", "solo_3v3": "Solo 3v3"
+    };
+    const modeLabel = modeLabels[modeKey] || modeKey;
+
+    const totalMatches = state.total_matches || 0;
+
+    // Mode tabs
+    const tabs = modes.map((mk, i) => {
+        const label = modeLabels[mk] || mk;
+        const active = mk === modeKey ? "active" : "";
+        return `<span class="idle-lb-tab ${active}">${escapeHtml(label)}</span>`;
+    }).join("");
+
+    // Rows — show every bot
+    const rows = entries.map((e, i) => {
+        const r = i + 1;
+        const rc = rankClass(r);
+        const games = e.matches_played === 1 ? "1 game" : `${e.matches_played} games`;
+        return `<div class="idle-lb-row">
+            <div class="idle-lb-rank ${rc}">#${r}</div>
+            <div class="idle-lb-info">
+                <div class="idle-lb-name">${escapeHtml(e.bot_name)}</div>
+                <div class="idle-lb-author">by ${escapeHtml(e.author || "Unknown")} · ${games}</div>
+            </div>
+            <div class="idle-lb-mmr">${formatMMR(e.mmr)}</div>
+        </div>`;
+    }).join("");
+
+    el.innerHTML = `
+        <div class="idle-lb-container">
+            <div class="idle-lb-header">
+                <div class="idle-lb-title">LEADERBOARD</div>
+                <div class="idle-lb-tabs">${tabs}</div>
+            </div>
+            <div class="idle-lb-body">
+                ${rows || '<div class="idle-lb-empty">No matches played yet</div>'}
+            </div>
+            <div class="idle-lb-footer">
+                ${totalMatches} match${totalMatches !== 1 ? "es" : ""} played · Bot MMR — does not reflect actual in-game rank
+            </div>
+        </div>`;
+}
+
+
+/* ── Utilities ─────────────────────────────────────────────── */
+function trunc(s, max) {
+    if (!s) return "";
+    s = s.replace(/\s+/g, " ").trim();
+    return s.length > max ? s.slice(0, max).trim() + "…" : s;
+}
+</script>
+</body>
+</html>
+

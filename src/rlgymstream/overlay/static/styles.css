@@ -1,0 +1,461 @@
+/* RLGymStream — single 1920×1080 OBS overlay.
+   Transparent background; three phases: pregame, live, postgame. */
+
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700&display=swap');
+
+:root {
+    --blue: #3b82f6;
+    --blue-dark: #1e3a5f;
+    --orange: #f97316;
+    --orange-dark: #5f3a1e;
+    --bg: rgba(10, 10, 20, 0.88);
+    --bg-light: rgba(20, 20, 40, 0.75);
+    --text: #f0f0f0;
+    --text-dim: #8a8a9a;
+    --accent: #a855f7;
+    --gold: #fbbf24;
+    --silver: #9ca3af;
+    --bronze: #d97706;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: transparent;
+    font-family: 'Rajdhani', sans-serif;
+    color: var(--text);
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+}
+
+#overlay {
+    width: 1920px;
+    height: 1080px;
+    position: relative;
+}
+
+.phase-layer {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   PRE-GAME — centered showcase, visible before match starts
+   ════════════════════════════════════════════════════════════════ */
+
+.pre-container {
+    background: var(--bg);
+    width: 1920px;
+    height: 1080px;
+    padding: 48px 80px;
+    display: flex;
+    flex-direction: column;
+    animation: fadeIn 0.4s ease-out;
+}
+
+.pre-header {
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.pre-mode {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 36px;
+    color: var(--accent);
+    letter-spacing: 6px;
+    text-transform: uppercase;
+}
+
+.pre-map {
+    font-size: 16px;
+    color: var(--text-dim);
+    margin-top: 2px;
+}
+
+.pre-match-num {
+    font-size: 13px;
+    color: var(--text-dim);
+    opacity: 0.6;
+}
+
+/* Teams side-by-side (blue left, orange right) */
+.pre-teams {
+    display: flex;
+    gap: 32px;
+    align-items: stretch;
+    flex: 1;
+    overflow: hidden;
+}
+
+.pre-team {
+    flex: 1;
+    overflow: hidden;
+}
+
+.pre-vs {
+    align-self: center;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 22px;
+    color: var(--text-dim);
+    opacity: 0.5;
+    padding: 0 8px;
+}
+
+.pre-team-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    letter-spacing: 4px;
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
+.pre-team.blue .pre-team-label  { color: var(--blue);   border-bottom: 2px solid var(--blue); }
+.pre-team.orange .pre-team-label { color: var(--orange); border-bottom: 2px solid var(--orange); }
+
+/* Bot showcase card */
+.pre-bot {
+    background: var(--bg-light);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+    border-left: 3px solid transparent;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+}
+.pre-bot.blue   { border-left-color: var(--blue); }
+.pre-bot.orange { border-left-color: var(--orange); }
+
+.pre-bot-logo {
+    width: 56px;
+    height: 56px;
+    border-radius: 8px;
+    object-fit: contain;
+    flex-shrink: 0;
+    background: rgba(255,255,255,0.05);
+}
+
+.pre-bot-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.pre-bot-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+}
+
+.pre-bot-name {
+    font-size: 22px;
+    font-weight: 700;
+}
+
+.pre-bot-author {
+    font-size: 13px;
+    color: var(--text-dim);
+}
+
+.pre-bot-lang {
+    background: rgba(168, 85, 247, 0.2);
+    color: var(--accent);
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+    letter-spacing: 0.5px;
+}
+
+.pre-bot-mmr-box {
+    text-align: right;
+    flex-shrink: 0;
+    margin-left: 12px;
+}
+
+.pre-bot-mmr {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 28px;
+    color: var(--gold);
+    line-height: 1;
+}
+
+.pre-bot-mmr-sub {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 2px;
+}
+
+.pre-bot-desc {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-top: 8px;
+    line-height: 1.4;
+}
+
+.pre-bot-fact {
+    font-size: 13px;
+    color: var(--accent);
+    margin-top: 6px;
+    opacity: 0.85;
+}
+
+/* Head-to-head bar */
+.pre-h2h {
+    margin-top: 18px;
+    text-align: center;
+}
+
+.pre-h2h-title {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    letter-spacing: 1px;
+}
+
+.pre-h2h-bar {
+    display: flex;
+    height: 22px;
+    border-radius: 11px;
+    overflow: hidden;
+    background: rgba(255,255,255,0.05);
+}
+
+.h2h-seg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 28px;
+    transition: width 0.4s ease;
+}
+.h2h-seg.blue   { background: var(--blue); }
+.h2h-seg.orange { background: var(--orange); }
+.h2h-seg.draw   { background: var(--text-dim); }
+
+/* Leaderboard mini-table */
+.pre-leaderboard {
+    margin-top: 18px;
+    background: var(--bg-light);
+    border-radius: 10px;
+    padding: 10px 16px;
+}
+
+.pre-lb-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    text-align: center;
+}
+
+.pre-lb-row {
+    display: flex;
+    align-items: center;
+    padding: 3px 0;
+    font-size: 14px;
+}
+
+.pre-lb-rank {
+    width: 32px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 13px;
+    font-weight: 700;
+}
+.pre-lb-rank.gold   { color: var(--gold); }
+.pre-lb-rank.silver { color: var(--silver); }
+.pre-lb-rank.bronze { color: var(--bronze); }
+
+.pre-lb-name {
+    flex: 1;
+    font-weight: 600;
+}
+
+.pre-lb-mmr {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 13px;
+    color: var(--gold);
+    min-width: 60px;
+    text-align: right;
+}
+
+.pre-disclaimer {
+    text-align: center;
+    font-size: 10px;
+    color: var(--text-dim);
+    opacity: 0.4;
+    margin-top: 14px;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   LIVE — blue bots stacked on left, orange bots stacked on right
+   Positioning is inline on the elements; these style the cards.
+   ════════════════════════════════════════════════════════════════ */
+
+.badge-card {
+    background: rgba(10, 10, 20, 0.75);
+    border-radius: 10px;
+    padding: 12px 20px;
+    min-width: 140px;
+}
+
+.badge-card.blue   { border-left: 3px solid var(--blue); }
+.badge-card.orange { border-right: 3px solid var(--orange); text-align: right; }
+
+.badge-name {
+    color: var(--text);
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.badge-mmr {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 28px;
+    color: var(--gold);
+    line-height: 1;
+}
+
+.badge-mmr-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 2px;
+}
+
+.badge-count {
+    font-size: 14px;
+    color: var(--text-dim);
+    font-weight: 400;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   IDLE — leaderboard between matches
+   ════════════════════════════════════════════════════════════════ */
+
+.idle-lb-container {
+    background: var(--bg);
+    width: 1920px;
+    height: 1080px;
+    padding: 60px 120px;
+    display: flex;
+    flex-direction: column;
+    animation: fadeIn 0.4s ease-out;
+}
+
+.idle-lb-header {
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.idle-lb-title {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 36px;
+    color: var(--accent);
+    letter-spacing: 6px;
+    margin-bottom: 16px;
+}
+
+.idle-lb-tabs {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+}
+
+.idle-lb-tab {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 13px;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    padding: 6px 16px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.03);
+}
+
+.idle-lb-tab.active {
+    color: var(--accent);
+    background: rgba(168, 85, 247, 0.15);
+    border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.idle-lb-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: hidden;
+}
+
+.idle-lb-row {
+    display: flex;
+    align-items: center;
+    padding: 10px 24px;
+    background: var(--bg-light);
+    border-radius: 10px;
+    transition: background 0.2s;
+}
+
+.idle-lb-rank {
+    width: 56px;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    text-align: center;
+    flex-shrink: 0;
+}
+.idle-lb-rank.gold   { color: var(--gold); }
+.idle-lb-rank.silver { color: var(--silver); }
+.idle-lb-rank.bronze { color: var(--bronze); }
+
+.idle-lb-info {
+    flex: 1;
+    margin-left: 16px;
+}
+
+.idle-lb-name {
+    font-size: 22px;
+    font-weight: 600;
+}
+
+.idle-lb-author {
+    font-size: 13px;
+    color: var(--text-dim);
+}
+
+.idle-lb-mmr {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 26px;
+    color: var(--gold);
+    text-align: right;
+    min-width: 100px;
+    flex-shrink: 0;
+}
+
+.idle-lb-empty {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 18px;
+    padding: 40px;
+}
+
+.idle-lb-footer {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-dim);
+    opacity: 0.5;
+    margin-top: 16px;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Animations
+   ════════════════════════════════════════════════════════════════ */
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}

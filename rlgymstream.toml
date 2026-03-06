@@ -1,0 +1,42 @@
+# RLGymStream configuration
+# See README.md for full documentation.
+
+overlay_port = 8080
+post_match_delay = 15
+pre_match_delay = 10
+match_timeout = 600
+
+# Modes to rotate through.  Options: "1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"
+mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
+
+# ── Bot Sources ──────────────────────────────────────────────────────
+# Each [[bot_sources]] points to a directory containing bot configs.
+#
+# If "bots" is set, each entry is a relative path to a .toml file
+# (e.g. "necto/bot.toml" or "ripple/v1.bot.toml").
+#
+# If "bots" is omitted, every *bot.toml file under "path" is discovered
+# recursively. Use "exclude" to skip certain folder names.
+
+[[bot_sources]]
+path = "C:/Users/Rolv/PycharmProjects/RLGymPack"
+bots = [
+    "AstraV5/bot.toml",
+    "Byte/bob_build/Byte/bot.toml",
+    "London/bob_build/GGLBot/bot.toml",
+    "necto/bot.toml",
+    "nexto/bot.toml",
+    "nextoplus/bot.toml",
+    "Opti/bot.toml",
+    "Opti/fr.bot.toml",
+    "Opti/gp.bot.toml",
+    "Ordis/bob_build/GGLBot_bob/bot.toml",
+    "ripple/bcm/bot.toml",
+    "ripple/v1.0/bot.toml",
+    "ripple/v1.1/bot.toml",
+]
+
+# Example: use every bot.toml in a directory, excluding some folders
+# [[bot_sources]]
+# path = "C:/repos/community-bots"
+# exclude = ["broken_bot", "deprecated"]

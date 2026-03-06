@@ -1,0 +1,2 @@
+[console_scripts]
+rlgymstream = rlgymstream.main:main
