@@ -87,6 +87,7 @@ class MatchLauncher:
             manager = self._get_manager()
             last_overlay_phase = ""
             hud_cycled = False
+            match_started = False  # True once we've seen Countdown (fresh match)
 
             try:
                 manager.start_match(match_config, wait_for_start=True)
@@ -99,6 +100,15 @@ class MatchLauncher:
                         continue
 
                     game_phase = packet.match_info.match_phase
+
+                    # Wait for Countdown to confirm this is a fresh match.
+                    # This prevents reading stale scores from a mercy'd match.
+                    if not match_started:
+                        if game_phase == flat.MatchPhase.Countdown:
+                            match_started = True
+                        else:
+                            time.sleep(0.1)
+                            continue
 
                     # Cycle HUD and queue replay save once when match first goes live
                     if not hud_cycled and game_phase in (
@@ -148,11 +158,10 @@ class MatchLauncher:
                             final_result.winner = "blue"
                         else:
                             final_result.winner = "orange"
-                        # Don't call stop_match() — the next start_match with
-                        # Restart behavior will end this match automatically.
-                        # Clear the cached packet so wait_for_first_packet
-                        # won't see a stale Ended phase.
-                        manager.packet = None
+                        try:
+                            manager.stop_match()
+                        except Exception:
+                            logger.debug("Failed to stop match", exc_info=True)
                         loop.call_soon_threadsafe(game_finished.set)
                         return
 
