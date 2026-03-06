@@ -12,7 +12,7 @@
     --bg-light: #1c0e30;
     --bg-badge: rgba(12, 6, 22, 0.8);
     --text: #f0f0f0;
-    --text-dim: #9a8aaa;
+    --text-dim: #b8a8c8;
     --accent: #7b2ff2;
     --accent-light: #a855f7;
     --gold: #fbbf24;
@@ -90,7 +90,6 @@ body {
 .pre-match-num {
     font-size: 13px;
     color: var(--text-dim);
-    opacity: 0.6;
 }
 
 /* Teams side-by-side (blue left, orange right) */
@@ -300,9 +299,8 @@ body {
 
 .pre-disclaimer {
     text-align: center;
-    font-size: 10px;
+    font-size: 13px;
     color: var(--text-dim);
-    opacity: 0.4;
     margin-top: 8px;
     flex-shrink: 0;
 }
@@ -477,9 +475,8 @@ body {
 
 .idle-lb-footer {
     text-align: center;
-    font-size: 10px;
+    font-size: 13px;
     color: var(--text-dim);
-    opacity: 0.4;
     margin-top: 8px;
     flex-shrink: 0;
 }

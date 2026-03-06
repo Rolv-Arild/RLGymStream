@@ -104,13 +104,16 @@ def predict_win_probability(
 
 
 def get_leaderboard(db: Database, mode: str) -> list[dict]:
-    """Return sorted leaderboard for a mode, including every enabled bot.
+    """Return sorted leaderboard for a mode.
 
-    Bots that haven't played in this mode yet appear with default ratings.
+    Only includes bots that support the mode.  Bots that haven't played
+    in this mode yet appear with default ratings.
     """
     all_bots = db.get_all_bots(enabled_only=True)
     result = []
     for bot in all_bots:
+        if not bot.supports_mode(mode):
+            continue
         assert bot.id is not None
         r = db.get_rating(bot.id, mode)
         display = ordinal(r.mu, r.sigma)

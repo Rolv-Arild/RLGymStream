@@ -16,8 +16,8 @@
         .badge-card.orange { border-right: 3px solid #f97316; text-align: right; }
         .badge-name { font-size: 20px; font-weight: 600; color: #f0f0f0; font-family: 'Poppins', sans-serif; }
         .badge-mmr { font-family: 'Orbitron', sans-serif; font-size: 28px; color: #fbbf24; line-height: 1; }
-        .badge-mmr-label { font-size: 10px; color: #8a8a9a; letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
-        .badge-count { font-size: 14px; color: #8a8a9a; font-weight: 400; }
+        .badge-mmr-label { font-size: 10px; color: #b8a8c8; letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
+        .badge-count { font-size: 14px; color: #b8a8c8; font-weight: 400; }
     </style>
 </head>
 <body>
@@ -171,8 +171,6 @@ function _updateContent(m, state) {
    ══════════════════════════════════════════════════════════════ */
 function renderPregame(m, state, el) {
     const h2h = state.head_to_head || {};
-    const boards = state.leaderboards || {};
-    const modeBoard = boards[m.mode] || [];
 
     // Build bot showcase cards
     const blueCards = m.team_blue.map(b => botShowcase(b, "blue")).join("");
@@ -200,26 +198,6 @@ function renderPregame(m, state, el) {
         h2hHtml = `<div class="pre-h2h"><div class="pre-h2h-title">First meeting!</div></div>`;
     }
 
-    // Leaderboard (top 5, skip in 3v3+ to save space)
-    let lbHtml = "";
-    const maxTeamSize = Math.max(m.team_blue.length, m.team_orange.length);
-    if (modeBoard.length > 0 && maxTeamSize <= 2) {
-        const rows = modeBoard.slice(0, 5).map((e, i) => {
-            const r = i + 1;
-            const rc = rankClass(r);
-            return `<div class="pre-lb-row">
-                <span class="pre-lb-rank ${rc}">#${r}</span>
-                <span class="pre-lb-name">${escapeHtml(e.bot_name)}</span>
-                <span class="pre-lb-mmr">${formatMMR(e.mmr)}</span>
-            </div>`;
-        }).join("");
-        lbHtml = `
-        <div class="pre-leaderboard">
-            <div class="pre-lb-title">${escapeHtml(m.mode_display)} Leaderboard</div>
-            ${rows}
-        </div>`;
-    }
-
     el.innerHTML = `
         <div class="pre-container">
             <div class="pre-header">
@@ -240,7 +218,6 @@ function renderPregame(m, state, el) {
                 </div>
             </div>
             ${h2hHtml}
-            ${lbHtml}
             <div class="pre-disclaimer">Bot MMR — does not reflect actual in-game rank</div>
         </div>`;
 }

@@ -62,7 +62,7 @@ function formatRating(r) {
 }
 
 function formatMMR(mmr) {
-    return mmr != null ? mmr.toLocaleString() : "—";
+    return mmr != null ? String(mmr) : "—";
 }
 
 function rankClass(rank) {

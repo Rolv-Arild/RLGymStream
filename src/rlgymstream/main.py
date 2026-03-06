@@ -146,10 +146,10 @@ async def run(config: AppConfig) -> None:
             match_state = _build_match_state(setup, match_counter, "pregame", db)
             overlay_state.update_match(match_state)
 
-            # Head-to-head (meaningful for standard modes: 1v1, 2v2, 3v3
-            # where each team is a single bot type)
+            # Clear stale H2H, then set for standard modes
+            overlay_state.update_head_to_head({})
             if not mode.is_solo_queue:
-                _update_h2h(db, setup, overlay_state)
+                _update_h2h(db, setup, overlay_state, mode.value)
 
             # Show pregame for a minimum duration, but it stays until
             # the game itself transitions (countdown/kickoff/live).
@@ -295,6 +295,7 @@ def _update_h2h(
     db: Database,
     setup: MatchSetup,
     overlay_state: OverlayState,
+    mode: str,
 ) -> None:
     """Update head-to-head data for standard modes (bot A vs bot B)."""
     bot_a = setup.team_blue[0]
@@ -302,7 +303,7 @@ def _update_h2h(
     if bot_a.id == bot_b.id:
         return  # same bot on both sides, no H2H
     assert bot_a.id is not None and bot_b.id is not None
-    h2h = db.get_head_to_head(bot_a.id, bot_b.id)
+    h2h = db.get_head_to_head(bot_a.id, bot_b.id, mode=mode)
     overlay_state.update_head_to_head({
         "bot_a_name": bot_a.name,
         "bot_b_name": bot_b.name,
