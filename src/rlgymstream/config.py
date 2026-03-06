@@ -73,7 +73,6 @@ class AppConfig:
     )
     post_match_delay: float = 15.0  # seconds between matches
     pre_match_delay: float = 10.0   # seconds to show pre-match screen
-    match_timeout: float = 600.0    # 10 min max per match
 
     @classmethod
     def from_toml(cls, path: Path | str = "rlgymstream.toml") -> "AppConfig":
@@ -115,8 +114,6 @@ class AppConfig:
                 cfg.post_match_delay = float(data["post_match_delay"])
             if "pre_match_delay" in data:
                 cfg.pre_match_delay = float(data["pre_match_delay"])
-            if "match_timeout" in data:
-                cfg.match_timeout = float(data["match_timeout"])
             if "mode_rotation" in data:
                 cfg.mode_rotation = [MatchMode(m) for m in data["mode_rotation"]]
             else:

@@ -87,8 +87,7 @@ class MatchLauncher:
             try:
                 manager.start_match(match_config, wait_for_start=True)
 
-                timeout = self._config.match_timeout
-                while (time.monotonic() - start_time) < timeout:
+                while True:
                     packet = manager.packet
                     if packet is None:
                         time.sleep(0.1)
@@ -130,12 +129,6 @@ class MatchLauncher:
 
                     time.sleep(0.1)
 
-                # Timeout
-                logger.warning("Match timed out after %.0f seconds", timeout)
-                final_result.duration_seconds = time.monotonic() - start_time
-                final_result.winner = "draw"
-                loop.call_soon_threadsafe(game_finished.set)
-
             except Exception:
                 logger.exception("Error inside match thread")
                 final_result.winner = "draw"
@@ -143,15 +136,7 @@ class MatchLauncher:
                 loop.call_soon_threadsafe(game_finished.set)
 
         thread_task = loop.run_in_executor(None, _run_match)
-
-        try:
-            await asyncio.wait_for(
-                game_finished.wait(),
-                timeout=self._config.match_timeout + 60,
-            )
-        except asyncio.TimeoutError:
-            logger.error("Match executor timed out")
-            final_result.winner = "draw"
+        await game_finished.wait()
 
         try:
             await asyncio.wait_for(thread_task, timeout=15)
