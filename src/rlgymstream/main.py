@@ -35,7 +35,14 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+# Ensure our logger hierarchy is configured even if basicConfig was a no-op
+# (e.g. if another library already set up the root logger).
 logger = logging.getLogger("rlgymstream")
+if not logger.handlers and not logger.parent.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+    logger.addHandler(_handler)
+logger.setLevel(logging.INFO)
 
 
 def main() -> None:
