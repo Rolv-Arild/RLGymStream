@@ -98,6 +98,7 @@ async def run(config: AppConfig) -> None:
 
     # Match loop
     match_counter = 0
+    last_map: str | None = None
     try:
         while not stop_event.is_set():
             # Re-discover bots each cycle (hot reload)
@@ -111,7 +112,7 @@ async def run(config: AppConfig) -> None:
             mode = pick_mode(config.mode_rotation, match_counter)
 
             # Matchmake
-            setup = pick_match(db, mode)
+            setup = pick_match(db, mode, last_map=last_map)
             if setup is None:
                 logger.warning(
                     "Not enough bots for %s (need %d, have %d), skipping…",
@@ -124,6 +125,7 @@ async def run(config: AppConfig) -> None:
                 continue
 
             match_counter += 1
+            last_map = setup.map_name
             logger.info("="*60)
             logger.info("MATCH #%d – %s", match_counter, mode.display_name)
             logger.info(
@@ -137,8 +139,9 @@ async def run(config: AppConfig) -> None:
             match_state = _build_match_state(setup, match_counter, "pregame", db)
             overlay_state.update_match(match_state)
 
-            # Head-to-head (meaningful for 1v1)
-            if mode == MatchMode.ONES:
+            # Head-to-head (meaningful for standard modes: 1v1, 2v2, 3v3
+            # where each team is a single bot type)
+            if not mode.is_solo_queue:
                 _update_h2h(db, setup, overlay_state)
 
             # Show pregame for a minimum duration, but it stays until
@@ -229,6 +232,7 @@ def _build_match_state(
         assert bot.id is not None
         r = db.get_rating(bot.id, mode_val)
         display = round(r.display_rating, 1)
+        wins, losses, _draws = db.get_bot_record(bot.id, mode_val)
         return OverlayBotInfo(
             id=bot.id,
             name=bot.name,
@@ -241,6 +245,8 @@ def _build_match_state(
             mu=round(r.mu, 1),
             sigma=round(r.sigma, 1),
             matches_played=r.matches_played,
+            wins=wins,
+            losses=losses,
             logo_path=bot.logo_path,
         )
 
@@ -284,11 +290,11 @@ def _update_h2h(
     setup: MatchSetup,
     overlay_state: OverlayState,
 ) -> None:
-    """Update head-to-head data for 1v1 matches."""
-    if len(setup.team_blue) != 1 or len(setup.team_orange) != 1:
-        return
+    """Update head-to-head data for standard modes (bot A vs bot B)."""
     bot_a = setup.team_blue[0]
     bot_b = setup.team_orange[0]
+    if bot_a.id == bot_b.id:
+        return  # same bot on both sides, no H2H
     assert bot_a.id is not None and bot_b.id is not None
     h2h = db.get_head_to_head(bot_a.id, bot_b.id)
     overlay_state.update_head_to_head({

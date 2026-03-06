@@ -1,1 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+
+# IDE
+.idea/
+
+# Database
+/data/rlgymstream.db
+
+# RLBot python interface (local reference copy)
 python-interface/
+
+# OS
+Thumbs.db
+.DS_Store
+

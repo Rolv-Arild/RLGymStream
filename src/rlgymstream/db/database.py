@@ -180,8 +180,34 @@ class Database:
             rows = conn.execute(q, params).fetchall()
             return [_row_to_match(r) for r in rows]
 
+    def get_bot_record(self, bot_id: int, mode: str) -> tuple[int, int, int]:
+        """Return (wins, losses, draws) for a bot in a mode."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT team_blue_ids, team_orange_ids, winner FROM matches WHERE mode=?",
+                (mode,),
+            ).fetchall()
+        bid = str(bot_id)
+        wins = losses = draws = 0
+        for row in rows:
+            blue_ids = row["team_blue_ids"].split(",")
+            orange_ids = row["team_orange_ids"].split(",")
+            in_blue = bid in blue_ids
+            in_orange = bid in orange_ids
+            if not (in_blue or in_orange):
+                continue
+            winner = row["winner"]
+            if winner == "draw":
+                draws += 1
+            elif (winner == "blue" and in_blue) or (winner == "orange" and in_orange):
+                wins += 1
+            else:
+                losses += 1
+        return wins, losses, draws
+
     def get_head_to_head(self, bot_a_id: int, bot_b_id: int,
                          mode: str | None = None) -> dict:
+
         """Return win/loss/draw between two bots (works for 1v1 and team modes)."""
         with self._conn() as conn:
             q = "SELECT * FROM matches WHERE 1=1"

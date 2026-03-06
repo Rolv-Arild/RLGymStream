@@ -1,28 +1,30 @@
 /* RLGymStream — single 1920×1080 OBS overlay.
-   Transparent background; three phases: pregame, live, postgame. */
+   Color theme based on the RLGym logo (deep purple / violet). */
 
-@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Orbitron:wght@400;700&display=swap');
 
 :root {
     --blue: #3b82f6;
     --blue-dark: #1e3a5f;
     --orange: #f97316;
     --orange-dark: #5f3a1e;
-    --bg: rgba(10, 10, 20, 0.88);
-    --bg-light: rgba(20, 20, 40, 0.75);
+    --bg: rgba(12, 6, 22, 0.92);
+    --bg-light: rgba(28, 14, 48, 0.78);
     --text: #f0f0f0;
-    --text-dim: #8a8a9a;
-    --accent: #a855f7;
+    --text-dim: #9a8aaa;
+    --accent: #7b2ff2;
+    --accent-light: #a855f7;
     --gold: #fbbf24;
     --silver: #9ca3af;
     --bronze: #d97706;
+    --purple-glow: rgba(85, 7, 120, 0.3);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
     background: transparent;
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Poppins', sans-serif;
     color: var(--text);
     width: 1920px;
     height: 1080px;
@@ -55,11 +57,19 @@ body {
     display: flex;
     flex-direction: column;
     animation: fadeIn 0.4s ease-out;
+    border-top: 3px solid var(--accent);
 }
 
 .pre-header {
     text-align: center;
-    margin-bottom: 32px;
+    margin-bottom: 24px;
+}
+
+.pre-header-logo {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 8px;
+    opacity: 0.8;
 }
 
 .pre-mode {
@@ -160,8 +170,8 @@ body {
 }
 
 .pre-bot-lang {
-    background: rgba(168, 85, 247, 0.2);
-    color: var(--accent);
+    background: rgba(123, 47, 242, 0.2);
+    color: var(--accent-light);
     font-size: 10px;
     padding: 1px 6px;
     border-radius: 4px;
@@ -298,7 +308,7 @@ body {
    ════════════════════════════════════════════════════════════════ */
 
 .badge-card {
-    background: rgba(10, 10, 20, 0.75);
+    background: rgba(12, 6, 22, 0.8);
     border-radius: 10px;
     padding: 12px 20px;
     min-width: 140px;
@@ -346,11 +356,19 @@ body {
     display: flex;
     flex-direction: column;
     animation: fadeIn 0.4s ease-out;
+    border-top: 3px solid var(--accent);
 }
 
 .idle-lb-header {
     text-align: center;
-    margin-bottom: 32px;
+    margin-bottom: 24px;
+}
+
+.idle-lb-logo {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 8px;
+    opacity: 0.8;
 }
 
 .idle-lb-title {
@@ -378,9 +396,9 @@ body {
 }
 
 .idle-lb-tab.active {
-    color: var(--accent);
-    background: rgba(168, 85, 247, 0.15);
-    border: 1px solid rgba(168, 85, 247, 0.3);
+    color: var(--accent-light);
+    background: rgba(123, 47, 242, 0.15);
+    border: 1px solid rgba(123, 47, 242, 0.3);
 }
 
 .idle-lb-body {
@@ -459,3 +477,14 @@ body {
     from { opacity: 0; }
     to   { opacity: 1; }
 }
+
+@keyframes fadeOut {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+}
+
+/* Smooth opacity transitions for phase layers */
+.phase-layer, #live-blue, #live-orange {
+    transition: opacity 0.3s ease-out;
+}
+

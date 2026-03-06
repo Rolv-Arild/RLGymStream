@@ -22,6 +22,8 @@ class OverlayBotInfo:
     mu: float = 25.0
     sigma: float = 8.333
     matches_played: int = 0
+    wins: int = 0
+    losses: int = 0
     logo_path: str | None = None
 
 

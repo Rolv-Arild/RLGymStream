@@ -7,14 +7,14 @@
     <style>
         /* Badge cards for live in-game display */
         .badge-card {
-            background: rgba(10, 10, 20, 0.75);
+            background: rgba(12, 6, 22, 0.8);
             border-radius: 10px;
             padding: 12px 20px;
             min-width: 140px;
         }
         .badge-card.blue   { border-left: 3px solid #3b82f6; }
         .badge-card.orange { border-right: 3px solid #f97316; text-align: right; }
-        .badge-name { font-size: 20px; font-weight: 600; color: #f0f0f0; font-family: 'Rajdhani', sans-serif; }
+        .badge-name { font-size: 20px; font-weight: 600; color: #f0f0f0; font-family: 'Poppins', sans-serif; }
         .badge-mmr { font-family: 'Orbitron', sans-serif; font-size: 28px; color: #fbbf24; line-height: 1; }
         .badge-mmr-label { font-size: 10px; color: #8a8a9a; letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
         .badge-count { font-size: 14px; color: #8a8a9a; font-weight: 400; }
@@ -84,9 +84,12 @@ function renderPregame(m, state, el) {
     const blueCards = m.team_blue.map(b => botShowcase(b, "blue")).join("");
     const orangeCards = m.team_orange.map(b => botShowcase(b, "orange")).join("");
 
-    // H2H section (only for 1v1 with history)
+    // H2H section (meaningful when each team is a single bot type)
+    const blueNames = new Set(m.team_blue.map(b => b.name));
+    const orangeNames = new Set(m.team_orange.map(b => b.name));
+    const isBotVsBot = blueNames.size === 1 && orangeNames.size === 1;
     let h2hHtml = "";
-    if (h2h.total > 0 && m.team_blue.length === 1 && m.team_orange.length === 1) {
+    if (h2h.total > 0 && isBotVsBot) {
         const wa = h2h.wins_a || 0, wb = h2h.wins_b || 0, d = h2h.draws || 0;
         const total = h2h.total;
         const pA = (wa/total*100).toFixed(0), pD = (d/total*100).toFixed(0), pB = (wb/total*100).toFixed(0);
@@ -99,7 +102,7 @@ function renderPregame(m, state, el) {
                 ${wb > 0 ? `<div class="h2h-seg orange" style="width:${pB}%">${wb}W</div>` : ""}
             </div>
         </div>`;
-    } else if (m.team_blue.length === 1 && m.team_orange.length === 1 && h2h.bot_a_name) {
+    } else if (isBotVsBot && h2h.bot_a_name) {
         h2hHtml = `<div class="pre-h2h"><div class="pre-h2h-title">First meeting!</div></div>`;
     }
 
@@ -125,6 +128,7 @@ function renderPregame(m, state, el) {
     el.innerHTML = `
         <div class="pre-container">
             <div class="pre-header">
+                <img class="pre-header-logo" src="/static/rlgym.png" alt="">
                 <div class="pre-mode">${escapeHtml(m.mode_display)}</div>
                 <div class="pre-map">${escapeHtml(m.map_name)}</div>
                 <div class="pre-match-num">Match #${m.match_number}</div>
@@ -151,6 +155,7 @@ function botShowcase(bot, team) {
     const fact = bot.fun_fact ? `<div class="pre-bot-fact">💡 ${escapeHtml(bot.fun_fact)}</div>` : "";
     const lang = bot.language ? `<span class="pre-bot-lang">${escapeHtml(bot.language)}</span>` : "";
     const games = bot.matches_played === 1 ? "1 game" : `${bot.matches_played} games`;
+    const record = bot.matches_played > 0 ? `${bot.wins}W-${bot.losses}L` : "No games";
     const logo = bot.logo_path
         ? `<img class="pre-bot-logo" src="/api/logo/${bot.id}" alt="">`
         : "";
@@ -164,7 +169,7 @@ function botShowcase(bot, team) {
                 </div>
                 <div class="pre-bot-mmr-box">
                     <div class="pre-bot-mmr">${formatMMR(bot.mmr)}</div>
-                    <div class="pre-bot-mmr-sub">MMR · ${games}</div>
+                    <div class="pre-bot-mmr-sub">MMR · ${record}</div>
                 </div>
             </div>
             ${desc ? `<div class="pre-bot-desc">${escapeHtml(desc)}</div>` : ""}
@@ -211,7 +216,11 @@ let _lbRotateTimer = null;
 
 function renderIdleLeaderboard(state, el) {
     const boards = state.leaderboards || {};
-    const modes = Object.keys(boards);
+    // Only show modes that have at least one match played
+    const modes = Object.keys(boards).filter(mk => {
+        const entries = boards[mk] || [];
+        return entries.some(e => e.matches_played > 0);
+    });
     if (modes.length === 0) { el.innerHTML = ""; return; }
 
     // Auto-rotate mode every 8 seconds
@@ -261,6 +270,7 @@ function renderIdleLeaderboard(state, el) {
     el.innerHTML = `
         <div class="idle-lb-container">
             <div class="idle-lb-header">
+                <img class="idle-lb-logo" src="/static/rlgym.png" alt="">
                 <div class="idle-lb-title">LEADERBOARD</div>
                 <div class="idle-lb-tabs">${tabs}</div>
             </div>

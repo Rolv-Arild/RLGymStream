@@ -52,6 +52,7 @@ def pick_match(
     db: Database,
     mode: MatchMode,
     map_name: str | None = None,
+    last_map: str | None = None,
 ) -> MatchSetup | None:
     """Select bots for a match in the given mode.
 
@@ -64,7 +65,12 @@ def pick_match(
         return None
 
     team_size = mode.team_size
-    chosen_map = map_name or random.choice(STANDARD_MAPS)
+    if map_name:
+        chosen_map = map_name
+    else:
+        # Avoid repeating the same map consecutively
+        candidates = [m for m in STANDARD_MAPS if m != last_map] or STANDARD_MAPS
+        chosen_map = random.choice(candidates)
 
     if mode.is_solo_queue:
         return _solo_queue_pick(db, bots, mode, team_size, chosen_map)
