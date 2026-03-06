@@ -105,7 +105,9 @@ class MatchLauncher:
                         try:
                             manager.set_game_state(commands=["CycleHUD"])
                             hud_cycled = True
+                            logger.info("Cycled HUD")
                             manager.set_game_state(commands=["QueSaveReplay"])
+                            logger.info("Queued replay save")
                         except Exception:
                             logger.debug("Failed to send commands", exc_info=True)
 
