@@ -8,8 +8,9 @@
     --blue-dark: #1e3a5f;
     --orange: #f97316;
     --orange-dark: #5f3a1e;
-    --bg: rgba(12, 6, 22, 0.92);
-    --bg-light: rgba(28, 14, 48, 0.78);
+    --bg: #0c0616;
+    --bg-light: #1c0e30;
+    --bg-badge: rgba(12, 6, 22, 0.8);
     --text: #f0f0f0;
     --text-dim: #9a8aaa;
     --accent: #7b2ff2;
@@ -53,7 +54,7 @@ body {
     background: var(--bg);
     width: 1920px;
     height: 1080px;
-    padding: 48px 80px;
+    padding: 32px 80px;
     display: flex;
     flex-direction: column;
     animation: fadeIn 0.4s ease-out;
@@ -62,19 +63,20 @@ body {
 
 .pre-header {
     text-align: center;
-    margin-bottom: 24px;
+    margin-bottom: 16px;
+    flex-shrink: 0;
 }
 
 .pre-header-logo {
-    width: 48px;
-    height: 48px;
-    margin: 0 auto 8px;
+    width: 40px;
+    height: 40px;
+    margin: 0 auto 4px;
     opacity: 0.8;
 }
 
 .pre-mode {
     font-family: 'Orbitron', sans-serif;
-    font-size: 36px;
+    font-size: 30px;
     color: var(--accent);
     letter-spacing: 6px;
     text-transform: uppercase;
@@ -103,7 +105,8 @@ body {
 
 .pre-team {
     flex: 1;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
 }
 
 .pre-vs {
@@ -128,20 +131,20 @@ body {
 /* Bot showcase card */
 .pre-bot {
     background: var(--bg-light);
-    border-radius: 10px;
-    padding: 14px 18px;
-    margin-bottom: 10px;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 6px;
     border-left: 3px solid transparent;
     display: flex;
     align-items: flex-start;
-    gap: 14px;
+    gap: 12px;
 }
 .pre-bot.blue   { border-left-color: var(--blue); }
 .pre-bot.orange { border-left-color: var(--orange); }
 
 .pre-bot-logo {
-    width: 56px;
-    height: 56px;
+    width: 48px;
+    height: 48px;
     border-radius: 8px;
     object-fit: contain;
     flex-shrink: 0;
@@ -160,12 +163,12 @@ body {
 }
 
 .pre-bot-name {
-    font-size: 22px;
+    font-size: 18px;
     font-weight: 700;
 }
 
 .pre-bot-author {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-dim);
 }
 
@@ -187,7 +190,7 @@ body {
 
 .pre-bot-mmr {
     font-family: 'Orbitron', sans-serif;
-    font-size: 28px;
+    font-size: 22px;
     color: var(--gold);
     line-height: 1;
 }
@@ -214,8 +217,9 @@ body {
 
 /* Head-to-head bar */
 .pre-h2h {
-    margin-top: 18px;
+    margin-top: 10px;
     text-align: center;
+    flex-shrink: 0;
 }
 
 .pre-h2h-title {
@@ -248,10 +252,11 @@ body {
 
 /* Leaderboard mini-table */
 .pre-leaderboard {
-    margin-top: 18px;
+    margin-top: 10px;
     background: var(--bg-light);
-    border-radius: 10px;
-    padding: 10px 16px;
+    border-radius: 8px;
+    padding: 8px 16px;
+    flex-shrink: 0;
 }
 
 .pre-lb-title {
@@ -299,7 +304,8 @@ body {
     font-size: 10px;
     color: var(--text-dim);
     opacity: 0.4;
-    margin-top: 14px;
+    margin-top: 8px;
+    flex-shrink: 0;
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -308,7 +314,7 @@ body {
    ════════════════════════════════════════════════════════════════ */
 
 .badge-card {
-    background: rgba(12, 6, 22, 0.8);
+    background: var(--bg-badge);
     border-radius: 10px;
     padding: 12px 20px;
     min-width: 140px;

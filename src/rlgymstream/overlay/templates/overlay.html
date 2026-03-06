@@ -12,6 +12,9 @@
             padding: 12px 20px;
             min-width: 140px;
         }
+            padding: 12px 20px;
+            min-width: 140px;
+        }
         .badge-card.blue   { border-left: 3px solid #3b82f6; }
         .badge-card.orange { border-right: 3px solid #f97316; text-align: right; }
         .badge-name { font-size: 20px; font-weight: 600; color: #f0f0f0; font-family: 'Poppins', sans-serif; }
@@ -56,9 +59,11 @@ window.renderState = function(state) {
     idleLbEl.style.display     = "none";
 
     if (m.phase === "pregame") {
+        _stopLbTimer();
         pregameEl.style.display = "flex";
         renderPregame(m, state, pregameEl);
     } else if (m.phase === "countdown" || m.phase === "live" || m.phase === "replay") {
+        _stopLbTimer();
         // "flex" activates the flex-direction:column from the inline style
         liveBlueEl.style.display   = "flex";
         liveOrangeEl.style.display = "flex";
@@ -71,7 +76,17 @@ window.renderState = function(state) {
         }
     }
     // postgame → everything hidden (game shows its own scoreboard)
+    if (m.phase === "postgame") { _stopLbTimer(); }
 };
+
+function _stopLbTimer() {
+    if (_lbRotateTimer) {
+        clearInterval(_lbRotateTimer);
+        _lbRotateTimer = null;
+    }
+    _lbCurrentMode = null;
+    _lbCurrentVersion = -1;
+}
 
 /* ══════════════════════════════════════════════════════════════
    PRE-GAME — full showcase
@@ -107,10 +122,11 @@ function renderPregame(m, state, el) {
         h2hHtml = `<div class="pre-h2h"><div class="pre-h2h-title">First meeting!</div></div>`;
     }
 
-    // Leaderboard (top 8)
+    // Leaderboard (top 5, skip in 3v3+ to save space)
     let lbHtml = "";
-    if (modeBoard.length > 0) {
-        const rows = modeBoard.slice(0, 8).map((e, i) => {
+    const maxTeamSize = Math.max(m.team_blue.length, m.team_orange.length);
+    if (modeBoard.length > 0 && maxTeamSize <= 2) {
+        const rows = modeBoard.slice(0, 5).map((e, i) => {
             const r = i + 1;
             const rc = rankClass(r);
             return `<div class="pre-lb-row">
@@ -214,6 +230,8 @@ function buildBadgeCards(team, teamClass) {
    ══════════════════════════════════════════════════════════════ */
 let _lbModeIdx = 0;
 let _lbRotateTimer = null;
+let _lbCurrentMode = null;
+let _lbCurrentVersion = -1;
 
 function renderIdleLeaderboard(state, el) {
     const boards = state.leaderboards || {};
@@ -222,12 +240,13 @@ function renderIdleLeaderboard(state, el) {
         const entries = boards[mk] || [];
         return entries.some(e => e.matches_played > 0);
     });
-    if (modes.length === 0) { el.innerHTML = ""; return; }
+    if (modes.length === 0) { el.innerHTML = ""; _lbCurrentMode = null; return; }
 
-    // Auto-rotate mode every 8 seconds
+    // Start rotation timer if not running
     if (!_lbRotateTimer) {
         _lbRotateTimer = setInterval(() => {
             _lbModeIdx++;
+            _lbCurrentMode = null; // force re-render on next call
             const s = window.getOverlayState();
             if (s && s.match.phase === "idle") {
                 const idleLbEl = document.getElementById("idle-leaderboard");
@@ -237,6 +256,12 @@ function renderIdleLeaderboard(state, el) {
     }
 
     const modeKey = modes[_lbModeIdx % modes.length];
+    const version = state.version || 0;
+
+    // Skip re-render if same mode and same data version (prevents flicker)
+    if (modeKey === _lbCurrentMode && version === _lbCurrentVersion) return;
+    _lbCurrentMode = modeKey;
+    _lbCurrentVersion = version;
     const entries = boards[modeKey] || [];
     const modeLabels = {
         "1v1": "1v1", "2v2": "2v2", "3v3": "3v3",
