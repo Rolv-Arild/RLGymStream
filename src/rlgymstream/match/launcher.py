@@ -148,10 +148,11 @@ class MatchLauncher:
                             final_result.winner = "blue"
                         else:
                             final_result.winner = "orange"
-                        try:
-                            manager.stop_match()
-                        except Exception:
-                            logger.debug("Failed to stop match", exc_info=True)
+                        # Don't call stop_match() — the next start_match with
+                        # Restart behavior will end this match automatically.
+                        # Clear the cached packet so wait_for_first_packet
+                        # won't see a stale Ended phase.
+                        manager.packet = None
                         loop.call_soon_threadsafe(game_finished.set)
                         return
 
