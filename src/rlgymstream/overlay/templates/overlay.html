@@ -12,9 +12,6 @@
             padding: 12px 20px;
             min-width: 140px;
         }
-            padding: 12px 20px;
-            min-width: 140px;
-        }
         .badge-card.blue   { border-left: 3px solid #3b82f6; }
         .badge-card.orange { border-right: 3px solid #f97316; text-align: right; }
         .badge-name { font-size: 20px; font-weight: 600; color: #f0f0f0; font-family: 'Poppins', sans-serif; }
@@ -45,47 +42,109 @@
 
 <script src="/static/overlay.js?v=3"></script>
 <script>
-window.renderState = function(state) {
-    const m = state.match;
-    const pregameEl    = document.getElementById("pregame");
-    const liveBlueEl   = document.getElementById("live-blue");
-    const liveOrangeEl = document.getElementById("live-orange");
-    const idleLbEl     = document.getElementById("idle-leaderboard");
+let _currentPhase = null;
+const FADE_MS = 300;
 
-    // Hide all layers first
-    pregameEl.style.display    = "none";
-    liveBlueEl.style.display   = "none";
-    liveOrangeEl.style.display = "none";
-    idleLbEl.style.display     = "none";
+// All phase layers we manage
+const _layers = {};
 
-    if (m.phase === "pregame") {
-        _stopLbTimer();
-        pregameEl.style.display = "flex";
-        renderPregame(m, state, pregameEl);
-    } else if (m.phase === "countdown" || m.phase === "live" || m.phase === "replay") {
-        _stopLbTimer();
-        // "flex" activates the flex-direction:column from the inline style
-        liveBlueEl.style.display   = "flex";
-        liveOrangeEl.style.display = "flex";
-        renderLiveBadges(m);
-    } else if (m.phase === "idle") {
-        const boards = state.leaderboards || {};
-        if (Object.keys(boards).length > 0) {
-            idleLbEl.style.display = "flex";
-            renderIdleLeaderboard(state, idleLbEl);
+function _initLayers() {
+    _layers.pregame    = document.getElementById("pregame");
+    _layers.liveBlue   = document.getElementById("live-blue");
+    _layers.liveOrange = document.getElementById("live-orange");
+    _layers.idle       = document.getElementById("idle-leaderboard");
+    // Prepare all layers: visible but transparent, ready for fade
+    for (const el of Object.values(_layers)) {
+        el.style.transition = `opacity ${FADE_MS}ms ease`;
+        el.style.opacity = "0";
+        // Keep display as-is initially (none from HTML)
+    }
+}
+
+function _showLayer(el, displayValue) {
+    el.style.display = displayValue;
+    // Force reflow so the transition triggers from opacity 0
+    void el.offsetHeight;
+    el.style.opacity = "1";
+}
+
+function _hideAllLayers() {
+    for (const el of Object.values(_layers)) {
+        el.style.opacity = "0";
+        el.style.display = "none";
+    }
+}
+
+function _fadeOutThen(callback) {
+    // Fade out all currently visible layers, then call callback
+    let anyVisible = false;
+    for (const el of Object.values(_layers)) {
+        if (el.style.display !== "none" && el.style.opacity !== "0") {
+            el.style.opacity = "0";
+            anyVisible = true;
         }
     }
-    // postgame → everything hidden (game shows its own scoreboard)
-    if (m.phase === "postgame") { _stopLbTimer(); }
+    if (anyVisible) {
+        setTimeout(() => {
+            _hideAllLayers();
+            callback();
+        }, FADE_MS);
+    } else {
+        _hideAllLayers();
+        callback();
+    }
+}
+
+// Determine a phase group key (so countdown/live/replay don't retrigger transitions)
+function _phaseGroup(phase) {
+    if (phase === "countdown" || phase === "live" || phase === "replay") return "live";
+    return phase;
+}
+
+window.renderState = function(state) {
+    const m = state.match;
+    if (!_layers.pregame) _initLayers();
+
+    const newGroup = _phaseGroup(m.phase);
+
+    if (newGroup === _currentPhase) {
+        // Same phase — just update content without fade
+        _updateContent(m, state);
+        return;
+    }
+
+    // Phase changed — crossfade
+    const oldGroup = _currentPhase;
+    _currentPhase = newGroup;
+
+    _fadeOutThen(() => {
+        _updateContent(m, state);
+        if (newGroup === "pregame") {
+            _showLayer(_layers.pregame, "flex");
+        } else if (newGroup === "live") {
+            _showLayer(_layers.liveBlue, "flex");
+            _showLayer(_layers.liveOrange, "flex");
+        } else if (newGroup === "idle") {
+            const boards = state.leaderboards || {};
+            const hasData = Object.keys(boards).some(mk =>
+                (boards[mk] || []).some(e => e.matches_played > 0)
+            );
+            if (hasData) {
+                _showLayer(_layers.idle, "flex");
+            }
+        }
+        // "postgame" → everything stays hidden
+    });
 };
 
-function _stopLbTimer() {
-    if (_lbRotateTimer) {
-        clearInterval(_lbRotateTimer);
-        _lbRotateTimer = null;
+function _updateContent(m, state) {
+    if (_phaseGroup(m.phase) === "pregame") {
+        renderPregame(m, state, _layers.pregame);
+    } else if (_phaseGroup(m.phase) === "live") {
+        renderLiveBadges(m);
+    } else if (_phaseGroup(m.phase) === "idle") {
+        renderIdleLeaderboard(state, _layers.idle);
     }
-    _lbCurrentMode = null;
-    _lbCurrentVersion = -1;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -226,70 +285,49 @@ function buildBadgeCards(team, teamClass) {
 
 
 /* ══════════════════════════════════════════════════════════════
-   IDLE — full-screen leaderboard between matches
+   IDLE — all-modes leaderboard on one page
    ══════════════════════════════════════════════════════════════ */
-let _lbModeIdx = 0;
-let _lbRotateTimer = null;
-let _lbCurrentMode = null;
 let _lbCurrentVersion = -1;
 
 function renderIdleLeaderboard(state, el) {
     const boards = state.leaderboards || {};
-    // Only show modes that have at least one match played
     const modes = Object.keys(boards).filter(mk => {
         const entries = boards[mk] || [];
         return entries.some(e => e.matches_played > 0);
     });
-    if (modes.length === 0) { el.innerHTML = ""; _lbCurrentMode = null; return; }
+    if (modes.length === 0) { el.innerHTML = ""; _lbCurrentVersion = -1; return; }
 
-    // Start rotation timer if not running
-    if (!_lbRotateTimer) {
-        _lbRotateTimer = setInterval(() => {
-            _lbModeIdx++;
-            _lbCurrentMode = null; // force re-render on next call
-            const s = window.getOverlayState();
-            if (s && s.match.phase === "idle") {
-                const idleLbEl = document.getElementById("idle-leaderboard");
-                if (idleLbEl) renderIdleLeaderboard(s, idleLbEl);
-            }
-        }, 8000);
-    }
-
-    const modeKey = modes[_lbModeIdx % modes.length];
     const version = state.version || 0;
-
-    // Skip re-render if same mode and same data version (prevents flicker)
-    if (modeKey === _lbCurrentMode && version === _lbCurrentVersion) return;
-    _lbCurrentMode = modeKey;
+    if (version === _lbCurrentVersion) return;
     _lbCurrentVersion = version;
-    const entries = boards[modeKey] || [];
+
     const modeLabels = {
         "1v1": "1v1", "2v2": "2v2", "3v3": "3v3",
         "solo_2v2": "Solo 2v2", "solo_3v3": "Solo 3v3"
     };
-    const modeLabel = modeLabels[modeKey] || modeKey;
-
     const totalMatches = state.total_matches || 0;
 
-    // Mode tabs
-    const tabs = modes.map((mk, i) => {
+    const columns = modes.map(mk => {
+        const entries = boards[mk] || [];
         const label = modeLabels[mk] || mk;
-        const active = mk === modeKey ? "active" : "";
-        return `<span class="idle-lb-tab ${active}">${escapeHtml(label)}</span>`;
-    }).join("");
+        const rows = entries.map((e, i) => {
+            const r = i + 1;
+            const rc = rankClass(r);
+            return `<div class="idle-lb-row">
+                <div class="idle-lb-rank ${rc}">#${r}</div>
+                <div class="idle-lb-info">
+                    <div class="idle-lb-name">${escapeHtml(e.bot_name)}</div>
+                    <div class="idle-lb-games">${e.matches_played} game${e.matches_played !== 1 ? "s" : ""}</div>
+                </div>
+                <div class="idle-lb-mmr">${formatMMR(e.mmr)}</div>
+            </div>`;
+        }).join("");
 
-    // Rows — show every bot
-    const rows = entries.map((e, i) => {
-        const r = i + 1;
-        const rc = rankClass(r);
-        const games = e.matches_played === 1 ? "1 game" : `${e.matches_played} games`;
-        return `<div class="idle-lb-row">
-            <div class="idle-lb-rank ${rc}">#${r}</div>
-            <div class="idle-lb-info">
-                <div class="idle-lb-name">${escapeHtml(e.bot_name)}</div>
-                <div class="idle-lb-author">by ${escapeHtml(e.author || "Unknown")} · ${games}</div>
+        return `<div class="idle-lb-col">
+            <div class="idle-lb-col-title">${escapeHtml(label)}</div>
+            <div class="idle-lb-col-body">
+                ${rows || '<div class="idle-lb-empty">No games yet</div>'}
             </div>
-            <div class="idle-lb-mmr">${formatMMR(e.mmr)}</div>
         </div>`;
     }).join("");
 
@@ -298,10 +336,9 @@ function renderIdleLeaderboard(state, el) {
             <div class="idle-lb-header">
                 <img class="idle-lb-logo" src="/static/rlgym.png" alt="">
                 <div class="idle-lb-title">LEADERBOARD</div>
-                <div class="idle-lb-tabs">${tabs}</div>
             </div>
-            <div class="idle-lb-body">
-                ${rows || '<div class="idle-lb-empty">No matches played yet</div>'}
+            <div class="idle-lb-columns">
+                ${columns}
             </div>
             <div class="idle-lb-footer">
                 ${totalMatches} match${totalMatches !== 1 ? "es" : ""} played · Bot MMR — does not reflect actual in-game rank

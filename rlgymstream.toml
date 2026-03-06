@@ -3,7 +3,7 @@
 
 overlay_port = 8080
 post_match_delay = 15
-pre_match_delay = 10
+pre_match_delay = 15
 leaderboard_delay = 15
 
 # Modes to rotate through.  Options: "1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"
