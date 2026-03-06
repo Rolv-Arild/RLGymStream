@@ -87,6 +87,9 @@ class MatchLauncher:
 
             try:
                 manager.start_match(match_config, wait_for_start=True)
+                # Small delay to let the connection stabilize before
+                # sending console commands.
+                time.sleep(1.0)
 
                 while True:
                     packet = manager.packet
@@ -96,20 +99,25 @@ class MatchLauncher:
 
                     game_phase = packet.match_info.match_phase
 
-                    # Cycle HUD once when match first goes live
-                    if not hud_cycled and game_phase in (
-                        flat.MatchPhase.Countdown,
-                        flat.MatchPhase.Kickoff,
-                        flat.MatchPhase.Active,
-                    ):
-                        try:
-                            manager.set_game_state(commands=["CycleHUD"])
+                    # Cycle HUD and queue replay save once when match first goes live
+                    if not hud_cycled:
+                        logger.info("Waiting for live phase, current: %s", game_phase)
+                        if game_phase in (
+                            flat.MatchPhase.Countdown,
+                            flat.MatchPhase.Kickoff,
+                            flat.MatchPhase.Active,
+                        ):
+                            try:
+                                manager.set_game_state(commands=["CycleHUD"])
+                                logger.info("Sent CycleHUD")
+                            except Exception:
+                                logger.warning("Failed to send CycleHUD", exc_info=True)
+                            try:
+                                manager.set_game_state(commands=["QueSaveReplay"])
+                                logger.info("Sent QueSaveReplay")
+                            except Exception:
+                                logger.warning("Failed to send QueSaveReplay", exc_info=True)
                             hud_cycled = True
-                            logger.info("Cycled HUD")
-                            manager.set_game_state(commands=["QueSaveReplay"])
-                            logger.info("Queued replay save")
-                        except Exception:
-                            logger.debug("Failed to send commands", exc_info=True)
 
                     # Read scores from packet
                     score_blue = 0
