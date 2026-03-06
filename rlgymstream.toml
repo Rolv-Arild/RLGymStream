@@ -19,7 +19,7 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 # recursively. Use "exclude" to skip certain folder names.
 
 [[bot_sources]]
-path = "C:/Users/Rolv/PycharmProjects/RLGymPack"
+path = "C:/Users/rolv_/PycharmProjects/RLGymPack"
 bots = [
     "AstraV5/bot.toml",
     "Byte/bob_build/Byte/bot.toml",
