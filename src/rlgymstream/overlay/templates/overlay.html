@@ -45,7 +45,6 @@
 let _currentPhase = null;
 const FADE_MS = 300;
 
-// All phase layers we manage
 const _layers = {};
 
 function _initLayers() {
@@ -53,52 +52,37 @@ function _initLayers() {
     _layers.liveBlue   = document.getElementById("live-blue");
     _layers.liveOrange = document.getElementById("live-orange");
     _layers.idle       = document.getElementById("idle-leaderboard");
-    // Prepare all layers: visible but transparent, ready for fade
     for (const el of Object.values(_layers)) {
         el.style.transition = `opacity ${FADE_MS}ms ease`;
         el.style.opacity = "0";
-        // Keep display as-is initially (none from HTML)
     }
 }
 
 function _showLayer(el, displayValue) {
     el.style.display = displayValue;
-    // Force reflow so the transition triggers from opacity 0
     void el.offsetHeight;
     el.style.opacity = "1";
 }
 
-function _hideAllLayers() {
-    for (const el of Object.values(_layers)) {
-        el.style.opacity = "0";
-        el.style.display = "none";
-    }
+function _hideLayer(el) {
+    el.style.opacity = "0";
+    el.style.display = "none";
 }
 
-function _fadeOutThen(callback) {
-    // Fade out all currently visible layers, then call callback
-    let anyVisible = false;
-    for (const el of Object.values(_layers)) {
-        if (el.style.display !== "none" && el.style.opacity !== "0") {
-            el.style.opacity = "0";
-            anyVisible = true;
-        }
-    }
-    if (anyVisible) {
-        setTimeout(() => {
-            _hideAllLayers();
-            callback();
-        }, FADE_MS);
-    } else {
-        _hideAllLayers();
-        callback();
-    }
-}
-
-// Determine a phase group key (so countdown/live/replay don't retrigger transitions)
+// Phase group key (countdown/live/replay are all "live")
 function _phaseGroup(phase) {
     if (phase === "countdown" || phase === "live" || phase === "replay") return "live";
     return phase;
+}
+
+// Full-screen phases that must crossfade without showing background
+const _fullScreenPhases = new Set(["pregame", "idle"]);
+
+function _getLayersForGroup(group) {
+    if (group === "pregame") return [_layers.pregame];
+    if (group === "live")    return [_layers.liveBlue, _layers.liveOrange];
+    if (group === "idle")    return [_layers.idle];
+    return [];
 }
 
 window.renderState = function(state) {
@@ -108,33 +92,68 @@ window.renderState = function(state) {
     const newGroup = _phaseGroup(m.phase);
 
     if (newGroup === _currentPhase) {
-        // Same phase — just update content without fade
+        // Same phase — just update content, no transition
         _updateContent(m, state);
         return;
     }
 
-    // Phase changed — crossfade
     const oldGroup = _currentPhase;
     _currentPhase = newGroup;
 
-    _fadeOutThen(() => {
-        _updateContent(m, state);
-        if (newGroup === "pregame") {
-            _showLayer(_layers.pregame, "flex");
-        } else if (newGroup === "live") {
-            _showLayer(_layers.liveBlue, "flex");
-            _showLayer(_layers.liveOrange, "flex");
-        } else if (newGroup === "idle") {
-            const boards = state.leaderboards || {};
-            const hasData = Object.keys(boards).some(mk =>
-                (boards[mk] || []).some(e => e.matches_played > 0)
-            );
-            if (hasData) {
-                _showLayer(_layers.idle, "flex");
+    // Render new content first (while still hidden or behind old layer)
+    _updateContent(m, state);
+
+    const oldLayers = _getLayersForGroup(oldGroup);
+    const newLayers = _getLayersForGroup(newGroup);
+
+    // If both old and new are full-screen, crossfade:
+    // show new underneath at full opacity, then fade old out on top.
+    if (_fullScreenPhases.has(oldGroup) && _fullScreenPhases.has(newGroup)) {
+        // Show new layer immediately at full opacity (underneath via z-order)
+        for (const el of newLayers) {
+            el.style.transition = "none";
+            el.style.display = "flex";
+            el.style.opacity = "1";
+            el.style.zIndex = "1";
+        }
+        // Old layer stays visible on top, then fades out
+        for (const el of oldLayers) {
+            el.style.zIndex = "2";
+            el.style.transition = `opacity ${FADE_MS}ms ease`;
+        }
+        void document.body.offsetHeight; // force reflow
+        for (const el of oldLayers) {
+            el.style.opacity = "0";
+        }
+        setTimeout(() => {
+            for (const el of oldLayers) _hideLayer(el);
+            // Reset z-index
+            for (const el of [...oldLayers, ...newLayers]) el.style.zIndex = "";
+            // Re-enable transition on new layers
+            for (const el of newLayers) el.style.transition = `opacity ${FADE_MS}ms ease`;
+        }, FADE_MS);
+    } else {
+        // Non-full-screen transition (e.g. live→postgame, pregame→live)
+        // Fade out old, then show new
+        let anyVisible = false;
+        for (const el of oldLayers) {
+            if (el.style.display !== "none" && el.style.opacity !== "0") {
+                el.style.transition = `opacity ${FADE_MS}ms ease`;
+                el.style.opacity = "0";
+                anyVisible = true;
             }
         }
-        // "postgame" → everything stays hidden
-    });
+        const showNew = () => {
+            for (const el of oldLayers) _hideLayer(el);
+            for (const el of newLayers) _showLayer(el, "flex");
+        };
+        if (anyVisible) {
+            setTimeout(showNew, FADE_MS);
+        } else {
+            for (const el of Object.values(_layers)) _hideLayer(el);
+            for (const el of newLayers) _showLayer(el, "flex");
+        }
+    }
 };
 
 function _updateContent(m, state) {
