@@ -103,8 +103,9 @@ class MatchLauncher:
                         flat.MatchPhase.Active,
                     ):
                         try:
-                            manager.set_game_state(commands=["CycleHUD", "QueSaveReplay"])
+                            manager.set_game_state(commands=["CycleHUD"])
                             hud_cycled = True
+                            manager.set_game_state(commands=["QueSaveReplay"])
                         except Exception:
                             logger.debug("Failed to send commands", exc_info=True)
 

@@ -30,10 +30,24 @@ def update_ratings(
     team_orange_ids: list[int],
     winner: str,  # "blue", "orange", "draw"
 ) -> None:
-    """Fetch current ratings, run OpenSkill update, persist new values."""
+    """Fetch current ratings, run OpenSkill update, persist new values.
 
-    blue_db = [db.get_rating(bid, mode) for bid in team_blue_ids]
-    orange_db = [db.get_rating(bid, mode) for bid in team_orange_ids]
+    Handles duplicate bot IDs:
+    - Within-team duplicates (e.g. standard 2v2: [5,5] vs [7,7]) are
+      deduplicated so each bot is rated once.
+    - Cross-team duplicates (solo queue: bot on both sides) get the
+      *average* of their blue-side and orange-side post-match ratings.
+      This is fair: the win and loss partially cancel out, with the
+      residual reflecting the strength of the other players.
+    """
+    blue_unique = list(dict.fromkeys(team_blue_ids))
+    orange_unique = list(dict.fromkeys(team_orange_ids))
+    shared = set(blue_unique) & set(orange_unique)
+
+    # Build the full deduplicated teams for the OpenSkill update.
+    # Shared bots appear in both teams — that's fine for rate().
+    blue_db = [db.get_rating(bid, mode) for bid in blue_unique]
+    orange_db = [db.get_rating(bid, mode) for bid in orange_unique]
 
     blue_os = [make_rating(r.mu, r.sigma) for r in blue_db]
     orange_os = [make_rating(r.mu, r.sigma) for r in orange_db]
@@ -51,17 +65,30 @@ def update_ratings(
         ranks=ranks,
     )
 
-    for db_rating, new_r in zip(blue_db, new_blue, strict=True):
-        db_rating.mu = new_r.mu
-        db_rating.sigma = new_r.sigma
-        db_rating.matches_played += 1
-        db.save_rating(db_rating)
+    # Map bot_id → new rating from each side
+    blue_results = dict(zip(blue_unique, new_blue))
+    orange_results = dict(zip(orange_unique, new_orange))
 
-    for db_rating, new_r in zip(orange_db, new_orange, strict=True):
-        db_rating.mu = new_r.mu
-        db_rating.sigma = new_r.sigma
-        db_rating.matches_played += 1
-        db.save_rating(db_rating)
+    # Collect all unique bots and save once each
+    all_ids = list(dict.fromkeys(blue_unique + orange_unique))
+    for bid in all_ids:
+        r = db.get_rating(bid, mode)
+        in_blue = bid in blue_results
+        in_orange = bid in orange_results
+
+        if in_blue and in_orange:
+            # Shared bot: average the two post-match ratings
+            r.mu = (blue_results[bid].mu + orange_results[bid].mu) / 2
+            r.sigma = (blue_results[bid].sigma + orange_results[bid].sigma) / 2
+        elif in_blue:
+            r.mu = blue_results[bid].mu
+            r.sigma = blue_results[bid].sigma
+        else:
+            r.mu = orange_results[bid].mu
+            r.sigma = orange_results[bid].sigma
+
+        r.matches_played += 1
+        db.save_rating(r)
 
 
 def predict_win_probability(
