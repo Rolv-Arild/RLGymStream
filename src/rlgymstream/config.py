@@ -71,8 +71,9 @@ class AppConfig:
     mode_rotation: list[MatchMode] = field(
         default_factory=lambda: list(MatchMode)
     )
-    post_match_delay: float = 15.0  # seconds between matches
+    post_match_delay: float = 15.0  # seconds to show in-game scoreboard
     pre_match_delay: float = 10.0   # seconds to show pre-match screen
+    leaderboard_delay: float = 15.0 # seconds to show leaderboard between matches
 
     @classmethod
     def from_toml(cls, path: Path | str = "rlgymstream.toml") -> "AppConfig":
@@ -114,6 +115,8 @@ class AppConfig:
                 cfg.post_match_delay = float(data["post_match_delay"])
             if "pre_match_delay" in data:
                 cfg.pre_match_delay = float(data["pre_match_delay"])
+            if "leaderboard_delay" in data:
+                cfg.leaderboard_delay = float(data["leaderboard_delay"])
             if "mode_rotation" in data:
                 cfg.mode_rotation = [MatchMode(m) for m in data["mode_rotation"]]
             else:

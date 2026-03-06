@@ -167,7 +167,9 @@ async def run(config: AppConfig) -> None:
             )
 
             # ── Post-game ─────────────────────────────────────────────
-            # The in-game scoreboard handles the post-match display.
+            # Let viewers see the in-game scoreboard first.
+            # The overlay shows nothing during "postgame" phase.
+            await _sleep_or_stop(config.post_match_delay, stop_event)
 
             # Persist match result
             blue_ids = [b.id for b in setup.team_blue]
@@ -200,15 +202,12 @@ async def run(config: AppConfig) -> None:
                 "map": setup.map_name,
             })
 
-            # Refresh leaderboards BEFORE setting idle so the
-            # idle state already contains up-to-date data.
+            # Refresh leaderboards and show the idle/leaderboard screen.
             _refresh_leaderboards(db, overlay_state, config.mode_rotation)
-
-            # Now show idle with the leaderboard
             overlay_state.update_match(OverlayMatchState(phase="idle"))
 
-            # Wait before next match so viewers can see the in-game scoreboard
-            await _sleep_or_stop(config.post_match_delay, stop_event)
+            # Show leaderboard for a bit before the next match
+            await _sleep_or_stop(config.leaderboard_delay, stop_event)
 
 
     except Exception:
