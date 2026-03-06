@@ -18,6 +18,9 @@ from rlgymstream.matchmaking.matchmaker import MatchSetup
 
 logger = logging.getLogger(__name__)
 
+# Mercy rule: end the match early if the goal difference reaches this.
+MERCY_GOAL_DIFF = 8
+
 # MatchPhase values we care about, mapped to overlay phase names.
 # Pregame is handled by the orchestrator before run_match is called.
 _PHASE_MAP = {
@@ -123,6 +126,34 @@ class MatchLauncher:
                             score_blue = team_info.score
                         elif team_info.team_index == 1:
                             score_orange = team_info.score
+
+                    # Mercy rule: end early if goal difference is too large
+                    if (
+                        abs(score_blue - score_orange) >= MERCY_GOAL_DIFF
+                        and game_phase in (
+                            flat.MatchPhase.Active,
+                            flat.MatchPhase.Kickoff,
+                            flat.MatchPhase.GoalScored,
+                        )
+                    ):
+                        logger.info(
+                            "Mercy rule triggered: %d-%d (diff=%d)",
+                            score_blue, score_orange,
+                            abs(score_blue - score_orange),
+                        )
+                        final_result.score_blue = score_blue
+                        final_result.score_orange = score_orange
+                        final_result.duration_seconds = time.monotonic() - start_time
+                        if score_blue > score_orange:
+                            final_result.winner = "blue"
+                        else:
+                            final_result.winner = "orange"
+                        try:
+                            manager.stop_match()
+                        except Exception:
+                            logger.debug("Failed to stop match", exc_info=True)
+                        loop.call_soon_threadsafe(game_finished.set)
+                        return
 
                     # Map game phase → overlay phase and notify on change
                     overlay_phase = _PHASE_MAP.get(game_phase, "")
