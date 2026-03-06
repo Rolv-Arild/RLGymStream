@@ -63,13 +63,14 @@ window.renderState = function(state) {
         liveBlueEl.style.display   = "flex";
         liveOrangeEl.style.display = "flex";
         renderLiveBadges(m);
-    } else if (m.phase === "idle" || m.phase === "postgame") {
+    } else if (m.phase === "idle") {
         const boards = state.leaderboards || {};
         if (Object.keys(boards).length > 0) {
             idleLbEl.style.display = "flex";
             renderIdleLeaderboard(state, idleLbEl);
         }
     }
+    // postgame → everything hidden (game shows its own scoreboard)
 };
 
 /* ══════════════════════════════════════════════════════════════

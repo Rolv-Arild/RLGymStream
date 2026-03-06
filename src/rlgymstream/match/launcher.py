@@ -83,6 +83,7 @@ class MatchLauncher:
             """Blocking work executed in a thread."""
             manager = self._get_manager()
             last_overlay_phase = ""
+            hud_cycled = False
 
             try:
                 manager.start_match(match_config, wait_for_start=True)
@@ -94,6 +95,18 @@ class MatchLauncher:
                         continue
 
                     game_phase = packet.match_info.match_phase
+
+                    # Cycle HUD once when match first goes live
+                    if not hud_cycled and game_phase in (
+                        flat.MatchPhase.Countdown,
+                        flat.MatchPhase.Kickoff,
+                        flat.MatchPhase.Active,
+                    ):
+                        try:
+                            manager.set_game_state(commands=["CycleHUD", "QueSaveReplay"])
+                            hud_cycled = True
+                        except Exception:
+                            logger.debug("Failed to send commands", exc_info=True)
 
                     # Read scores from packet
                     score_blue = 0
