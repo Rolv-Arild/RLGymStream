@@ -1,4 +1,5 @@
 # RLGymStream configuration
+# Copy this file to rlgymstream.toml and edit the paths below.
 # See README.md for full documentation.
 
 overlay_port = 8080
@@ -18,25 +19,16 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 # If "bots" is omitted, every *bot.toml file under "path" is discovered
 # recursively. Use "exclude" to skip certain folder names.
 
-[[bot_sources]]
-path = "C:/Users/rolv_/PycharmProjects/RLGymPack"
-bots = [
-    "AstraV5/bot.toml",
-    "Byte/bob_build/Byte/bot.toml",
-    "London/bob_build/GGLBot/bot.toml",
-    "necto/bot.toml",
-    "nexto/bot.toml",
-    "nextoplus/bot.toml",
-    "Opti/bot.toml",
-    "Opti/fr.bot.toml",
-    "Opti/gp.bot.toml",
-    "Ordis/bob_build/GGLBot_bob/bot.toml",
-    "ripple/bcm/bot.toml",
-    "ripple/v1.0/bot.toml",
-    "ripple/v1.1/bot.toml",
-]
-
-# Example: use every bot.toml in a directory, excluding some folders
+# Example: explicitly list bots
 # [[bot_sources]]
-# path = "C:/repos/community-bots"
+# path = "/path/to/your/bots"
+# bots = [
+#     "my_bot/bot.toml",
+#     "another_bot/v1.bot.toml",
+# ]
+
+# Example: auto-discover bots in a directory, excluding some folders
+# [[bot_sources]]
+# path = "/path/to/community-bots"
 # exclude = ["broken_bot", "deprecated"]
+

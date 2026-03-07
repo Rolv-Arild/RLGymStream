@@ -10,9 +10,47 @@ build/
 
 # IDE
 .idea/
+*.swp
+*.swo
+*~
 
-# Database
-/data/rlgymstream.db
+# ── RLGymStream ──────────────────────────────────────────────
+
+# Database (contains bot names, ratings, match history)
+*.db
+*.db-shm
+*.db-wal
+/data/
+
+# User config (contains local filesystem paths to bot repos)
+rlgymstream.toml
+
+# Saved replays
+*.replay
+
+# ── Bot leak prevention ──────────────────────────────────────
+# Bot config files
+bot.toml
+*.bot.toml
+
+# Common bot model / binary formats
+*.onnx
+*.pt
+*.pth
+*.h5
+*.hdf5
+*.pb
+*.tflite
+*.pkl
+*.pickle
+*.joblib
+*.npy
+*.npz
+*.safetensors
+
+# Entire bot directories (if someone copies bots into the repo)
+bots/
+bot_sources/
 
 # RLBot python interface (local reference copy)
 python-interface/
