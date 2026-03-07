@@ -256,12 +256,23 @@ function botShowcase(bot, team) {
 function renderLiveBadges(m) {
     const blueEl = document.getElementById("live-blue");
     const orangeEl = document.getElementById("live-orange");
-    blueEl.innerHTML = buildBadgeCards(m.team_blue, "blue");
-    orangeEl.innerHTML = buildBadgeCards(m.team_orange, "orange");
+    const isSolo = m.mode && m.mode.startsWith("solo_");
+    blueEl.innerHTML = buildBadgeCards(m.team_blue, "blue", isSolo);
+    orangeEl.innerHTML = buildBadgeCards(m.team_orange, "orange", isSolo);
 }
 
-function buildBadgeCards(team, teamClass) {
-    // Group duplicate bots (same name) into "BotName ×N"
+function buildBadgeCards(team, teamClass, expandAll) {
+    if (expandAll) {
+        // Solo queue: show each bot individually, no grouping
+        return team.map(b => {
+            return `<div class="badge-card ${teamClass}">
+                <div class="badge-name">${escapeHtml(b.name)}</div>
+                <div class="badge-mmr">${formatMMR(b.mmr)}</div>
+                <div class="badge-mmr-label">MMR</div>
+            </div>`;
+        }).join("");
+    }
+    // Standard modes: group duplicate bots (same name) into "BotName ×N"
     const grouped = [];
     const seen = {};
     for (const b of team) {

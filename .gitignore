@@ -36,6 +36,7 @@ bot.toml
 # Common bot model / binary formats
 *.onnx
 *.pt
+*.lt
 *.pth
 *.h5
 *.hdf5

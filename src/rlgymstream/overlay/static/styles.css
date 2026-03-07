@@ -141,8 +141,8 @@ body {
 .pre-bot.orange { border-left-color: var(--orange); }
 
 .pre-bot-logo {
-    width: 48px;
-    height: 48px;
+    width: 96px;
+    height: 96px;
     border-radius: 8px;
     object-fit: contain;
     flex-shrink: 0;

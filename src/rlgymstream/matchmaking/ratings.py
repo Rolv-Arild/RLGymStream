@@ -32,6 +32,9 @@ def update_ratings(
 ) -> None:
     """Fetch current ratings, run OpenSkill update, persist new values.
 
+    Draws are skipped (no mu/sigma change) — they shouldn't occur in
+    normal Rocket League play and likely indicate an error.
+
     Handles duplicate bot IDs:
     - Within-team duplicates (e.g. standard 2v2: [5,5] vs [7,7]) are
       deduplicated so each bot is rated once.
@@ -40,6 +43,9 @@ def update_ratings(
       This is fair: the win and loss partially cancel out, with the
       residual reflecting the strength of the other players.
     """
+    if winner == "draw":
+        return
+
     blue_unique = list(dict.fromkeys(team_blue_ids))
     orange_unique = list(dict.fromkeys(team_orange_ids))
     shared = set(blue_unique) & set(orange_unique)
@@ -52,13 +58,10 @@ def update_ratings(
     blue_os = [make_rating(r.mu, r.sigma) for r in blue_db]
     orange_os = [make_rating(r.mu, r.sigma) for r in orange_db]
 
-    # ranks: lower = better.  Same rank → draw.
     if winner == "blue":
         ranks = [0, 1]
-    elif winner == "orange":
-        ranks = [1, 0]
     else:
-        ranks = [0, 0]  # draw
+        ranks = [1, 0]
 
     new_blue, new_orange = _model.rate(
         teams=[blue_os, orange_os],

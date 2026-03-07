@@ -108,12 +108,6 @@ async def run(config: AppConfig) -> None:
     last_map: str | None = None
     try:
         while not stop_event.is_set():
-            # Re-discover bots each cycle (hot reload)
-            bots = discover_bots(config.bot_sources, db)
-            if not bots:
-                logger.warning("No bots available, waiting 30s…")
-                await _sleep_or_stop(30, stop_event)
-                continue
 
             # Pick mode
             mode = pick_mode(config.mode_rotation, match_counter)

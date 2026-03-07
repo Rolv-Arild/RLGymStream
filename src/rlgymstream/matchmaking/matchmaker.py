@@ -78,6 +78,11 @@ def pick_match(
         return _standard_pick(db, bots, mode, team_size, chosen_map)
 
 
+# Maximum p*(1-p) is 0.25 (when p=0.5).  Used to normalise accept probability.
+_MAX_WEIGHT = 0.25
+_MAX_RETRIES = 1000
+
+
 def _standard_pick(
     db: Database,
     bots: list[Bot],
@@ -87,60 +92,39 @@ def _standard_pick(
 ) -> MatchSetup | None:
     """Standard mode: each team is one bot (duplicated to fill team_size).
 
-    For 1v1 this is just bot A vs bot B.  For 2v2 it's AA vs BB,
-    for 3v3 it's AAA vs BBB.  The matchup is weighted by
-    p_win × (1 − p_win) so evenly-matched bots play more often.
+    Uses accept/reject sampling — generate a random pair, accept with
+    probability p*(1-p)/0.25 so evenly-matched bots play more often.
     """
     if len(bots) < 2:
         return None
 
-    # Build (bot, rating_obj) for every eligible bot
-    bot_ratings: list[tuple[Bot, PlackettLuceRating]] = []
+    # Pre-compute ratings for all bots
+    bot_ratings: dict[int, PlackettLuceRating] = {}
     for bot in bots:
         assert bot.id is not None
         r = db.get_rating(bot.id, mode.value)
-        bot_ratings.append((bot, make_rating(r.mu, r.sigma)))
+        bot_ratings[bot.id] = make_rating(r.mu, r.sigma)
 
-    # Enumerate all pairs of distinct bots and weight by p*(1-p)
-    pairs: list[tuple[Bot, Bot, float]] = []
-    for i, (bot_a, os_a) in enumerate(bot_ratings):
-        for j, (bot_b, os_b) in enumerate(bot_ratings):
-            if j <= i:
-                continue
-            blue_team_os = [os_a] * team_size
-            orange_team_os = [os_b] * team_size
-            probs = _os_model.predict_win([blue_team_os, orange_team_os])
-            p = probs[0]
-            weight = p * (1 - p)  # maximised at p=0.5
-            pairs.append((bot_a, bot_b, weight))
-
-    if not pairs:
+    for _ in range(_MAX_RETRIES):
         a, b = random.sample(bots, 2)
-        return MatchSetup(
-            mode=mode,
-            team_blue=[a] * team_size,
-            team_orange=[b] * team_size,
-            map_name=map_name,
-        )
+        os_a = bot_ratings[a.id]
+        os_b = bot_ratings[b.id]
+        probs = _os_model.predict_win([[os_a], [os_b]])
+        p = probs[0]
+        weight = p * (1 - p)
+        if random.random() < weight / _MAX_WEIGHT:
+            # Randomly assign blue vs orange
+            if random.random() < 0.5:
+                a, b = b, a
+            return MatchSetup(
+                mode=mode,
+                team_blue=[a] * team_size,
+                team_orange=[b] * team_size,
+                map_name=map_name,
+            )
 
-    # Weighted random choice
-    total = sum(w for _, _, w in pairs)
-    if total <= 0:
-        a, b, _ = random.choice(pairs)
-    else:
-        r = random.uniform(0, total)
-        cumulative = 0.0
-        a, b = pairs[0][0], pairs[0][1]
-        for bot_a, bot_b, w in pairs:
-            cumulative += w
-            if cumulative >= r:
-                a, b = bot_a, bot_b
-                break
-
-    # Randomly assign which bot is blue vs orange
-    if random.random() < 0.5:
-        a, b = b, a
-
+    # Fallback: accept any matchup
+    a, b = random.sample(bots, 2)
     return MatchSetup(
         mode=mode,
         team_blue=[a] * team_size,
@@ -156,10 +140,10 @@ def _solo_queue_pick(
     team_size: int,
     map_name: str,
 ) -> MatchSetup:
-    """Solo-queue mode: duplicates allowed, weighted by p × (1 − p).
+    """Solo-queue mode: duplicates allowed.
 
-    Generate a batch of random team pairs and pick one with probability
-    proportional to how even the matchup is.
+    Uses accept/reject sampling — generate random teams, accept with
+    probability p*(1-p)/0.25.
     """
     bot_os: dict[int, PlackettLuceRating] = {}
     for bot in bots:
@@ -167,35 +151,25 @@ def _solo_queue_pick(
         r = db.get_rating(bot.id, mode.value)
         bot_os[bot.id] = make_rating(r.mu, r.sigma)
 
-    # Generate candidate matchups (sample many, weight, pick one)
-    candidates: list[tuple[list[Bot], list[Bot], float]] = []
-    n_candidates = min(200, max(50, len(bots) ** 2))
-    for _ in range(n_candidates):
+    for _ in range(_MAX_RETRIES):
         blue = random.choices(bots, k=team_size)
         orange = random.choices(bots, k=team_size)
-        blue_os = [bot_os[b.id] for b in blue]
-        orange_os = [bot_os[b.id] for b in orange]
-        probs = _os_model.predict_win([blue_os, orange_os])
+        blue_ratings = [bot_os[b.id] for b in blue]
+        orange_ratings = [bot_os[b.id] for b in orange]
+        probs = _os_model.predict_win([blue_ratings, orange_ratings])
         p = probs[0]
         weight = p * (1 - p)
-        candidates.append((blue, orange, weight))
+        if random.random() < weight / _MAX_WEIGHT:
+            return MatchSetup(
+                mode=mode,
+                team_blue=blue,
+                team_orange=orange,
+                map_name=map_name,
+            )
 
-    # Weighted random choice
-    total = sum(w for _, _, w in candidates)
-    if total <= 0:
-        blue = random.choices(bots, k=team_size)
-        orange = random.choices(bots, k=team_size)
-        return MatchSetup(mode=mode, team_blue=blue, team_orange=orange, map_name=map_name)
-
-    r = random.uniform(0, total)
-    cumulative = 0.0
-    for blue, orange, w in candidates:
-        cumulative += w
-        if cumulative >= r:
-            return MatchSetup(mode=mode, team_blue=blue, team_orange=orange, map_name=map_name)
-
-    # Fallback (shouldn't reach here)
-    blue, orange, _ = candidates[-1]
+    # Fallback: accept any matchup
+    blue = random.choices(bots, k=team_size)
+    orange = random.choices(bots, k=team_size)
     return MatchSetup(mode=mode, team_blue=blue, team_orange=orange, map_name=map_name)
 
 
