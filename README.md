@@ -18,8 +18,9 @@ ratings, and serves real-time OBS-compatible overlays.
 - **OBS overlay** — a single 1920×1080 browser source with pre-match showcases, live badges, and all-modes leaderboard
 - **Multi-source bot discovery** — point at multiple directories/repos with include/exclude filters
 - **RLBot validation** — every `bot.toml` is validated with `rlbot.config.load_player_config` at discovery
-- **Mercy rule** — matches end early if the goal difference reaches 8
-- **SQLite persistence** — all results and ratings survive restarts
+- **Mercy rule** — matches end early if the goal difference reaches a configurable threshold (default 8)
+- **Sigma priority** — configurable chance to prioritize matchups involving the most uncertain bot, helping new bots calibrate faster
+- **SQLite persistence** — all results, ratings, and match counter survive restarts
 
 ## Prerequisites
 
@@ -58,6 +59,8 @@ overlay_port = 8080
 post_match_delay = 15       # seconds to show in-game scoreboard after match
 pre_match_delay = 15        # seconds to show pre-match screen
 leaderboard_delay = 15      # seconds to show leaderboard between matches
+sigma_priority_chance = 0.1 # chance to require the most uncertain bot in a match (0.0–1.0)
+mercy_goal_diff = 8         # end match early if goal difference reaches this
 mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 
 # List specific bot config files by path:
@@ -172,7 +175,7 @@ src/rlgymstream/
 │   ├── bot_discovery.py          # Multi-source scanning + RLBot validation + tag parsing
 │   └── launcher.py               # Reusable MatchManager, packet polling, mercy rule
 ├── matchmaking/
-│   ├── matchmaker.py             # Rating-proximity bot selection, mode filtering, map rotation
+│   ├── matchmaker.py             # Accept/reject matchmaking, sigma priority, map rotation
 │   └── ratings.py                # OpenSkill PlackettLuce wrapper, cross-team duplicate handling
 └── overlay/
     ├── server.py                 # FastAPI app with SSE + JSON API
@@ -194,4 +197,19 @@ Uses [OpenSkill](https://openskill.me/en/stable/) with the
 - Supports team-based rating updates (2v2, 3v3)
 - Bots appearing on both teams in solo queue receive the average of their
   win-side and loss-side rating updates
+- **Draws are skipped** — no rating change (draws shouldn't occur in normal
+  Rocket League play and likely indicate an error)
 - Win probability prediction via `model.predict_win()`
+
+## Matchmaking
+
+Matchups are selected via **accept/reject sampling**: a random matchup is
+generated, then accepted with probability proportional to `p × (1 − p)`
+(where `p` is the predicted win probability for one side).  This maximises
+at 50/50 matchups and gracefully falls off for mismatches.
+
+With `sigma_priority_chance` probability, an additional constraint is added:
+the matchup must also include the bot with the highest σ (most uncertain
+rating) in the current mode.  This helps new or under-played bots get
+calibrated faster without biasing which opponent they face.
+

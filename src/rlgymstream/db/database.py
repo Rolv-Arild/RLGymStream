@@ -168,6 +168,12 @@ class Database:
             match.id = cur.fetchone()[0]
         return match
 
+    def get_match_count(self) -> int:
+        """Return the total number of matches in the database."""
+        with self._conn() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM matches").fetchone()
+            return row[0]
+
     def get_recent_matches(self, limit: int = 20, mode: str | None = None) -> list[Match]:
         with self._conn() as conn:
             q = "SELECT * FROM matches"

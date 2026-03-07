@@ -58,6 +58,7 @@ async def run(config: AppConfig) -> None:
     """Async entry: start overlay server + match loop."""
     db = Database(config.db_path)
     overlay_state = OverlayState()
+    overlay_state.total_matches = db.get_match_count()
     launcher = MatchLauncher(config)
 
     # Discover bots
@@ -103,8 +104,9 @@ async def run(config: AppConfig) -> None:
             # Windows doesn't support add_signal_handler
             pass
 
-    # Match loop
-    match_counter = 0
+    # Match loop — resume counter from database
+    match_counter = db.get_match_count()
+    logger.info("Resuming from match #%d", match_counter)
     last_map: str | None = None
     try:
         while not stop_event.is_set():
@@ -113,7 +115,8 @@ async def run(config: AppConfig) -> None:
             mode = pick_mode(config.mode_rotation, match_counter)
 
             # Matchmake
-            setup = pick_match(db, mode, last_map=last_map)
+            setup = pick_match(db, mode, last_map=last_map,
+                               sigma_priority_chance=config.sigma_priority_chance)
             if setup is None:
                 logger.warning(
                     "Not enough bots for %s (need %d, have %d), skipping…",

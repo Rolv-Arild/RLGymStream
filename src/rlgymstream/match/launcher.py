@@ -18,9 +18,6 @@ from rlgymstream.matchmaking.matchmaker import MatchSetup
 
 logger = logging.getLogger(__name__)
 
-# Mercy rule: end the match early if the goal difference reaches this.
-MERCY_GOAL_DIFF = 8
-
 # MatchPhase values we care about, mapped to overlay phase names.
 # Pregame is handled by the orchestrator before run_match is called.
 _PHASE_MAP = {
@@ -138,8 +135,9 @@ class MatchLauncher:
                             score_orange = team_info.score
 
                     # Mercy rule: end early if goal difference is too large
+                    mercy_diff = self._config.mercy_goal_diff
                     if (
-                        abs(score_blue - score_orange) >= MERCY_GOAL_DIFF
+                        abs(score_blue - score_orange) >= mercy_diff
                         and game_phase in (
                             flat.MatchPhase.Active,
                             flat.MatchPhase.Kickoff,

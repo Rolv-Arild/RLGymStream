@@ -16,6 +16,11 @@ from rlgymstream.config import MatchMode
 from rlgymstream.db.database import Database
 from rlgymstream.db.models import Bot
 from rlgymstream.matchmaking.ratings import make_rating, _model as _os_model
+from rlbot.utils.maps import STANDARD_MAPS
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -26,33 +31,12 @@ class MatchSetup:
     map_name: str = "DFHStadium"
 
 
-# Standard competitive maps (subset of GAME_MAP_TO_UPK)
-STANDARD_MAPS = [
-    "DFHStadium",
-    "Mannfield",
-    "ChampionsField",
-    "UrbanCentral",
-    "BeckwithPark",
-    "UtopiaColiseum",
-    "Wasteland",
-    "NeoTokyo",
-    "AquaDome",
-    "StarbaseArc",
-    "Farmstead",
-    "SaltyShores",
-    "ForbiddenTemple",
-    "DeadeyeCanyon",
-    "SovereignHeights",
-    "RivalsArena",
-    "NeonFields",
-]
-
-
 def pick_match(
     db: Database,
     mode: MatchMode,
     map_name: str | None = None,
     last_map: str | None = None,
+    sigma_priority_chance: float = 0.0,
 ) -> MatchSetup | None:
     """Select bots for a match in the given mode.
 
@@ -73,9 +57,9 @@ def pick_match(
         chosen_map = random.choice(candidates)
 
     if mode.is_solo_queue:
-        return _solo_queue_pick(db, bots, mode, team_size, chosen_map)
+        return _solo_queue_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance)
     else:
-        return _standard_pick(db, bots, mode, team_size, chosen_map)
+        return _standard_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance)
 
 
 # Maximum p*(1-p) is 0.25 (when p=0.5).  Used to normalise accept probability.
@@ -89,39 +73,62 @@ def _standard_pick(
     mode: MatchMode,
     team_size: int,
     map_name: str,
+    sigma_priority_chance: float,
 ) -> MatchSetup | None:
     """Standard mode: each team is one bot (duplicated to fill team_size).
 
     Uses accept/reject sampling — generate a random pair, accept with
     probability p*(1-p)/0.25 so evenly-matched bots play more often.
+
+    With *sigma_priority_chance* probability, an additional criterion is
+    applied: the matchup must also include the highest-sigma bot,
+    helping under-played bots get calibrated faster.
     """
     if len(bots) < 2:
         return None
 
     # Pre-compute ratings for all bots
     bot_ratings: dict[int, PlackettLuceRating] = {}
+    bot_sigmas: dict[int, float] = {}
     for bot in bots:
         assert bot.id is not None
         r = db.get_rating(bot.id, mode.value)
         bot_ratings[bot.id] = make_rating(r.mu, r.sigma)
+        bot_sigmas[bot.id] = r.sigma
+
+    # Identify the highest-sigma bot for priority matches
+    priority_bot = max(bots, key=lambda b: bot_sigmas[b.id])
+    use_sigma_priority = random.random() < sigma_priority_chance
+    if use_sigma_priority:
+        logger.debug("Sigma priority active: looking for %s (σ=%.2f)",
+                      priority_bot.name, bot_sigmas[priority_bot.id])
 
     for _ in range(_MAX_RETRIES):
         a, b = random.sample(bots, 2)
         os_a = bot_ratings[a.id]
         os_b = bot_ratings[b.id]
+
+        # Accept/reject based on match evenness
         probs = _os_model.predict_win([[os_a], [os_b]])
         p = probs[0]
         weight = p * (1 - p)
-        if random.random() < weight / _MAX_WEIGHT:
-            # Randomly assign blue vs orange
-            if random.random() < 0.5:
-                a, b = b, a
-            return MatchSetup(
-                mode=mode,
-                team_blue=[a] * team_size,
-                team_orange=[b] * team_size,
-                map_name=map_name,
-            )
+        if random.random() >= weight / _MAX_WEIGHT:
+            continue
+
+        # Additionally require the highest-sigma bot when active
+        if use_sigma_priority:
+            if a.id != priority_bot.id and b.id != priority_bot.id:
+                continue
+
+        # Randomly assign blue vs orange
+        if random.random() < 0.5:
+            a, b = b, a
+        return MatchSetup(
+            mode=mode,
+            team_blue=[a] * team_size,
+            team_orange=[b] * team_size,
+            map_name=map_name,
+        )
 
     # Fallback: accept any matchup
     a, b = random.sample(bots, 2)
@@ -139,33 +146,55 @@ def _solo_queue_pick(
     mode: MatchMode,
     team_size: int,
     map_name: str,
+    sigma_priority_chance: float,
 ) -> MatchSetup:
     """Solo-queue mode: duplicates allowed.
 
     Uses accept/reject sampling — generate random teams, accept with
     probability p*(1-p)/0.25.
+
+    With *sigma_priority_chance* probability, an additional criterion is
+    applied: the matchup must also include the highest-sigma bot.
     """
     bot_os: dict[int, PlackettLuceRating] = {}
+    bot_sigmas: dict[int, float] = {}
     for bot in bots:
         assert bot.id is not None
         r = db.get_rating(bot.id, mode.value)
         bot_os[bot.id] = make_rating(r.mu, r.sigma)
+        bot_sigmas[bot.id] = r.sigma
+
+    priority_bot = max(bots, key=lambda b: bot_sigmas[b.id])
+    use_sigma_priority = random.random() < sigma_priority_chance
+    if use_sigma_priority:
+        logger.debug("Sigma priority (solo): looking for %s (σ=%.2f)",
+                      priority_bot.name, bot_sigmas[priority_bot.id])
 
     for _ in range(_MAX_RETRIES):
         blue = random.choices(bots, k=team_size)
         orange = random.choices(bots, k=team_size)
+
+        # Accept/reject based on match evenness
         blue_ratings = [bot_os[b.id] for b in blue]
         orange_ratings = [bot_os[b.id] for b in orange]
         probs = _os_model.predict_win([blue_ratings, orange_ratings])
         p = probs[0]
         weight = p * (1 - p)
-        if random.random() < weight / _MAX_WEIGHT:
-            return MatchSetup(
-                mode=mode,
-                team_blue=blue,
-                team_orange=orange,
-                map_name=map_name,
-            )
+        if random.random() >= weight / _MAX_WEIGHT:
+            continue
+
+        # Additionally require the highest-sigma bot when active
+        if use_sigma_priority:
+            all_ids = {b.id for b in blue} | {b.id for b in orange}
+            if priority_bot.id not in all_ids:
+                continue
+
+        return MatchSetup(
+            mode=mode,
+            team_blue=blue,
+            team_orange=orange,
+            map_name=map_name,
+        )
 
     # Fallback: accept any matchup
     blue = random.choices(bots, k=team_size)

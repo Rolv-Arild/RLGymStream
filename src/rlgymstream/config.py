@@ -72,8 +72,10 @@ class AppConfig:
         default_factory=lambda: list(MatchMode)
     )
     post_match_delay: float = 15.0  # seconds to show in-game scoreboard
-    pre_match_delay: float = 10.0   # seconds to show pre-match screen
+    pre_match_delay: float = 15.0   # seconds to show pre-match screen
     leaderboard_delay: float = 15.0 # seconds to show leaderboard between matches
+    sigma_priority_chance: float = 0.1  # chance to force highest-sigma bot into a match
+    mercy_goal_diff: int = 8            # end match early if goal diff reaches this
 
     @classmethod
     def from_toml(cls, path: Path | str = "rlgymstream.toml") -> "AppConfig":
@@ -117,6 +119,10 @@ class AppConfig:
                 cfg.pre_match_delay = float(data["pre_match_delay"])
             if "leaderboard_delay" in data:
                 cfg.leaderboard_delay = float(data["leaderboard_delay"])
+            if "sigma_priority_chance" in data:
+                cfg.sigma_priority_chance = float(data["sigma_priority_chance"])
+            if "mercy_goal_diff" in data:
+                cfg.mercy_goal_diff = int(data["mercy_goal_diff"])
             if "mode_rotation" in data:
                 cfg.mode_rotation = [MatchMode(m) for m in data["mode_rotation"]]
             else:
