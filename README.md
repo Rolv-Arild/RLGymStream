@@ -4,18 +4,21 @@ A Twitch stream platform that automatically runs Rocket League bot competitions
 using **RLBot v5**, tracks match results with **OpenSkill** (Plackett-Luce)
 ratings, and serves real-time OBS-compatible overlays.
 
+🔴 **Live at [twitch.tv/rlgym](https://www.twitch.tv/rlgym)**
+
 ## Features
 
 - **Automated match loop** — matchmake → launch → collect results → update ratings → repeat
 - **5 competition modes** — 1v1, 2v2, 3v3, Solo Queue 2v2, Solo Queue 3v3
-  - Standard modes use unique bots per team
-  - Solo Queue allows the same bot to appear on both teams
+  - Standard modes use the same bot duplicated to fill each team
+  - Solo Queue allows different bots on the same team (duplicates permitted)
+- **Smart matchmaking** — favours competitive matchups based on current ratings
 - **OpenSkill ratings** — separate Plackett-Luce rating (μ/σ) per bot per mode
-- **Head-to-head tracking** — win/loss/draw records between any two bots
-- **OBS overlays** — live-updating web pages for match info, leaderboards, and H2H
-- **Multi-source bot discovery** — point at multiple directories/repos with include/exclude glob filters
+- **Head-to-head tracking** — win/loss/draw records between any two bots, per mode
+- **OBS overlay** — a single 1920×1080 browser source with pre-match showcases, live badges, and all-modes leaderboard
+- **Multi-source bot discovery** — point at multiple directories/repos with include/exclude filters
 - **RLBot validation** — every `bot.toml` is validated with `rlbot.config.load_player_config` at discovery
-- **Hot-reload** — add/remove bots between matches without restarting
+- **Mercy rule** — matches end early if the goal difference reaches 8
 - **SQLite persistence** — all results and ratings survive restarts
 
 ## Prerequisites
@@ -42,27 +45,33 @@ pip install -e .
 
 ## Configuration
 
+Copy the example config and edit it:
+
+```bash
+cp rlgymstream.example.toml rlgymstream.toml
+```
+
 All settings live in **`rlgymstream.toml`** in the project root:
 
 ```toml
 overlay_port = 8080
-post_match_delay = 15
-pre_match_delay = 10
+post_match_delay = 15       # seconds to show in-game scoreboard after match
+pre_match_delay = 15        # seconds to show pre-match screen
+leaderboard_delay = 15      # seconds to show leaderboard between matches
 mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 
 # List specific bot config files by path:
 [[bot_sources]]
-path = "C:/repos/RLGymPack"
+path = "/path/to/your/bots"
 bots = [
-    "necto/bot.toml",              # standard bot.toml
+    "necto/bot.toml",
     "nexto/bot.toml",
-    "Byte/bob_build/Byte/bot.toml", # nested path
-    "ripple/v1.bot.toml",           # prefixed config name
+    "ripple/v1.bot.toml",           # prefixed config names are supported
 ]
 
 # Or discover all *bot.toml files recursively, excluding some folders:
 [[bot_sources]]
-path = "C:/repos/community-bots"
+path = "/path/to/community-bots"
 exclude = ["broken_bot", "deprecated"]
 ```
 
@@ -73,10 +82,10 @@ Each `[[bot_sources]]` entry points at a directory (typically a cloned repo).
 - **`bots`** (recommended) — list relative paths to bot config `.toml` files.
   Files can be named `bot.toml` or use a prefix like `v1.bot.toml`.
 - If **`bots` is omitted**, every file matching `*bot.toml` under `path` is
-  discovered recursively. Use **`exclude`** to skip folder names.
+  discovered recursively.
   Use **`exclude`** to skip folder names (matched with `fnmatch` against the relative path).
 
-Every discovered `bot.toml` is validated with `rlbot.config.load_player_config`.
+Every discovered config is validated with `rlbot.config.load_player_config`.
 Invalid configs are skipped with a warning.
 
 ### Mode tags
@@ -90,6 +99,7 @@ tags = ["1v1", "teamplay"]   # teamplay → 2v2 + 3v3
 
 Recognised tags: `1v1`, `2v2`, `3v3`, `teamplay` (implies 2v2 + 3v3).
 Bots with no tags are assumed to support all modes.
+Bots only appear on leaderboards for modes they support.
 
 ### Environment variable overrides
 
@@ -110,9 +120,9 @@ python -m rlgymstream.main
 
 This will:
 1. Read `rlgymstream.toml` for bot sources and settings
-2. Scan all sources, validate each `bot.toml` with RLBot, register valid bots
+2. Scan all sources, validate each config with RLBot, register valid bots
 3. Start the overlay web server on `http://127.0.0.1:8080`
-4. Begin the automatic match loop (cycling through all configured modes)
+4. Begin the automatic match loop (cycling randomly through configured modes)
 
 ## OBS Overlay Setup
 
@@ -122,33 +132,36 @@ Add a single **Browser Source** in OBS:
 |---|---|
 | `http://127.0.0.1:8080/` | **1920×1080** |
 
-The overlay is phase-aware and stays out of the way of in-game UI
-(avoids bottom-left scoreboard, bottom-right boost, top-center timer):
+The overlay is phase-aware and avoids in-game UI
+(bottom-left scoreboard, bottom-right boost, top-centre timer):
 
 | Phase | What's shown |
 |---|---|
-| **Pre-match** | Centered showcase — bot name, author, language, MMR, description, fun fact, head-to-head record (1v1), and the current mode leaderboard |
-| **Live** | Minimal badges in the top-left (blue) and top-right (orange) corners showing bot names + MMR |
-| **Post-match** | Winner banner centred on screen, plus the corner badges |
-| **Idle** | Nothing (fully transparent) |
+| **Pre-match** | Full-screen showcase — bot names, authors, descriptions, fun facts, MMR, win/loss record, and head-to-head (standard modes) |
+| **Live** | Minimal badges in top-left (blue) and top-right (orange) showing bot names + MMR |
+| **Post-match** | Nothing — the in-game scoreboard is visible |
+| **Idle** | Full-screen all-modes leaderboard (one column per mode) |
 
-MMR is displayed as **20 × rating + 100** (Rocket League-style) with a
-disclaimer that it does not reflect actual in-game rank.
+Transitions between phases use smooth crossfades.
 
-The overlay has a **transparent background** and updates in real-time via
-Server-Sent Events (SSE).
+### MMR display
+
+MMR is displayed as **20 × rating + 1000** (Rocket League-style) with a
+disclaimer that it does not reflect actual in-game rank. New bots start at
+1000 MMR.
 
 ## API Endpoints
 
 | Endpoint | Description |
 |---|---|
+| `GET /` | The overlay page |
 | `GET /api/state` | Full JSON snapshot (match, leaderboards, recent results, H2H) |
-| `GET /api/events` | SSE stream — pushes a `state` event whenever anything changes |
+| `GET /api/events` | SSE stream — pushes a `state` event on every update |
 
 ## Architecture
 
 ```
-rlgymstream.toml                  # bot sources, overlay port, mode rotation, delays
+rlgymstream.example.toml          # example config (copy to rlgymstream.toml)
 src/rlgymstream/
 ├── config.py                     # MatchMode enum, BotSource, AppConfig (TOML loader)
 ├── main.py                       # Orchestration loop entry point
@@ -157,28 +170,28 @@ src/rlgymstream/
 │   └── database.py               # SQLite layer with upsert/query helpers
 ├── match/
 │   ├── bot_discovery.py          # Multi-source scanning + RLBot validation + tag parsing
-│   └── launcher.py               # Reusable MatchManager, load_player_config, packet polling
+│   └── launcher.py               # Reusable MatchManager, packet polling, mercy rule
 ├── matchmaking/
 │   ├── matchmaker.py             # Rating-proximity bot selection, mode filtering, map rotation
-│   └── ratings.py                # OpenSkill PlackettLuce wrapper
+│   └── ratings.py                # OpenSkill PlackettLuce wrapper, cross-team duplicate handling
 └── overlay/
     ├── server.py                 # FastAPI app with SSE + JSON API
     ├── state.py                  # Thread-safe shared state
-    ├── static/styles.css         # Phase-aware 1920×1080 overlay styles
+    ├── static/styles.css         # RLGym purple theme, 1920×1080 overlay styles
     ├── static/overlay.js         # SSE client + helper utilities
-    └── templates/overlay.html    # Single page: pregame showcase → live badges → postgame banner
+    ├── static/rlgym.png          # RLGym logo
+    └── templates/overlay.html    # Single page: pregame → live badges → leaderboard
 ```
 
 ## Rating System
 
-Uses [OpenSkill](https://github.com/vivek-uka/openskill.py) with the
+Uses [OpenSkill](https://openskill.me/en/stable/) with the
 **Plackett-Luce** model:
 
 - Each bot starts at **μ=25, σ=8.33** per mode
 - Display rating = **μ − 3σ** (conservative estimate)
+- MMR = **20 × display rating + 1000**
 - Supports team-based rating updates (2v2, 3v3)
+- Bots appearing on both teams in solo queue receive the average of their
+  win-side and loss-side rating updates
 - Win probability prediction via `model.predict_win()`
-
-## License
-
-MIT
