@@ -90,6 +90,9 @@ def update_ratings(
         blue_unique = list(dict.fromkeys(team_blue_ids))
         orange_unique = list(dict.fromkeys(team_orange_ids))
 
+        assert len(blue_unique) == len(orange_unique) == 1, \
+            "Non-solo modes should have exactly 1 unique bot per team after deduplication."
+
         blue_os = [make_rating(db.get_rating(bid, mode).mu, db.get_rating(bid, mode).sigma)
                    for bid in blue_unique]
         orange_os = [make_rating(db.get_rating(bid, mode).mu, db.get_rating(bid, mode).sigma)
