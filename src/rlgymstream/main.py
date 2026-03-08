@@ -22,7 +22,7 @@ from rlgymstream.db.models import Match as MatchModel
 from rlgymstream.match.bot_discovery import discover_bots
 from rlgymstream.match.launcher import MatchLauncher
 from rlgymstream.matchmaking.matchmaker import MatchSetup, pick_match, pick_mode
-from rlgymstream.matchmaking.ratings import get_leaderboard, update_ratings
+from rlgymstream.matchmaking.ratings import get_leaderboard, update_ratings, predict_win_probability
 from rlgymstream.overlay.server import create_overlay_app
 from rlgymstream.overlay.state import (
     OverlayBotInfo,
@@ -141,12 +141,24 @@ async def run(config: AppConfig) -> None:
 
             # ── Pre-game phase ───────────────────────────────────────
             match_state = _build_match_state(setup, match_counter, "pregame", db)
+
+            # Compute win probabilities
+            blue_ids = [b.id for b in setup.team_blue]
+            orange_ids = [b.id for b in setup.team_orange]
+            win_probs = predict_win_probability(db, mode.value, blue_ids, orange_ids)
+            match_state.win_probabilities = [round(p, 3) for p in win_probs]
+
             overlay_state.update_match(match_state)
 
             # Clear stale H2H, then set for standard modes
             overlay_state.update_head_to_head({})
             if not mode.is_solo_queue:
                 _update_h2h(db, setup, overlay_state, mode.value)
+
+            # Capture pre-match MMRs for delta calculation
+            pre_mmrs: dict[int, int] = {}
+            for b in match_state.team_blue + match_state.team_orange:
+                pre_mmrs[b.id] = b.mmr
 
             # Show pregame for a minimum duration, but it stays until
             # the game itself transitions (countdown/kickoff/live).
@@ -171,14 +183,7 @@ async def run(config: AppConfig) -> None:
             )
 
             # ── Post-game ─────────────────────────────────────────────
-            # Let viewers see the in-game scoreboard first.
-            # The overlay shows nothing during "postgame" phase.
-            await _sleep_or_stop(config.post_match_delay, stop_event)
-
             # Persist match result
-            blue_ids = [b.id for b in setup.team_blue]
-            orange_ids = [b.id for b in setup.team_orange]
-
             match_record = MatchModel(
                 mode=mode.value,
                 map_name=setup.map_name,
@@ -194,6 +199,25 @@ async def run(config: AppConfig) -> None:
 
             # Update OpenSkill ratings
             update_ratings(db, mode.value, blue_ids, orange_ids, result.winner)
+
+            # Compute MMR deltas (post - pre)
+            mmr_deltas: dict[int, int] = {}
+            for b in setup.team_blue + setup.team_orange:
+                assert b.id is not None
+                r = db.get_rating(b.id, mode.value)
+                post_mmr = _rating_to_mmr(round(r.display_rating, 1))
+                mmr_deltas[b.id] = post_mmr - pre_mmrs.get(b.id, post_mmr)
+
+            # Update match state with postgame info (badges stay visible)
+            match_state.phase = "postgame"
+            match_state.score_blue = result.score_blue
+            match_state.score_orange = result.score_orange
+            match_state.winner = result.winner
+            match_state.mmr_deltas = mmr_deltas
+            overlay_state.update_match(match_state)
+
+            # Let viewers see the in-game scoreboard + MMR deltas
+            await _sleep_or_stop(config.post_match_delay, stop_event)
 
             # Update overlay recent results
             overlay_state.add_recent_result({

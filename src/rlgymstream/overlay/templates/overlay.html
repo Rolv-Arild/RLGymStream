@@ -18,14 +18,16 @@
         .badge-mmr { font-family: 'Orbitron', sans-serif; font-size: 28px; color: #fbbf24; line-height: 1; }
         .badge-mmr-label { font-size: 10px; color: #b8a8c8; letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
         .badge-count { font-size: 14px; color: #b8a8c8; font-weight: 400; }
+        .badge-delta-pos { font-size: 16px; color: #4ade80; font-weight: 600; margin-left: 6px; }
+        .badge-delta-neg { font-size: 16px; color: #f87171; font-weight: 600; margin-left: 6px; }
     </style>
 </head>
 <body>
 <!--
   Single 1920×1080 OBS Browser Source overlay.
-  - pregame:  full-screen bot showcase (descriptions, fun facts, MMR, H2H, leaderboard)
+  - pregame:  full-screen bot showcase (descriptions, fun facts, MMR, H2H, win probability)
   - live:     minimal badges in top-left/top-right (avoids game UI)
-  - postgame: nothing (game shows its own scoreboard)
+  - postgame: badges with MMR gain/loss deltas (game shows its own scoreboard)
   - idle:     leaderboard between matches
 -->
 <div id="overlay">
@@ -69,9 +71,9 @@ function _hideLayer(el) {
     el.style.display = "none";
 }
 
-// Phase group key (countdown/live/replay are all "live")
+// Phase group key (countdown/live/replay/postgame all show badges)
 function _phaseGroup(phase) {
-    if (phase === "countdown" || phase === "live" || phase === "replay") return "live";
+    if (phase === "countdown" || phase === "live" || phase === "replay" || phase === "postgame") return "live";
     return phase;
 }
 
@@ -171,17 +173,18 @@ function _updateContent(m, state) {
    ══════════════════════════════════════════════════════════════ */
 function renderPregame(m, state, el) {
     const h2h = state.head_to_head || {};
+    const isSolo = m.mode && m.mode.startsWith("solo_");
 
     // Build bot showcase cards
-    const blueCards = m.team_blue.map(b => botShowcase(b, "blue")).join("");
-    const orangeCards = m.team_orange.map(b => botShowcase(b, "orange")).join("");
+    const blueCards = m.team_blue.map(b => botShowcase(b, "blue", isSolo)).join("");
+    const orangeCards = m.team_orange.map(b => botShowcase(b, "orange", isSolo)).join("");
 
-    // H2H section (meaningful when each team is a single bot type)
+    // H2H section (meaningful for standard modes with single bot type per team)
     const blueNames = new Set(m.team_blue.map(b => b.name));
     const orangeNames = new Set(m.team_orange.map(b => b.name));
     const isBotVsBot = blueNames.size === 1 && orangeNames.size === 1;
     let h2hHtml = "";
-    if (h2h.total > 0 && isBotVsBot) {
+    if (!isSolo && h2h.total > 0 && isBotVsBot) {
         const wa = h2h.wins_a || 0, wb = h2h.wins_b || 0, d = h2h.draws || 0;
         const total = h2h.total;
         const pA = (wa/total*100).toFixed(0), pD = (d/total*100).toFixed(0), pB = (wb/total*100).toFixed(0);
@@ -194,8 +197,24 @@ function renderPregame(m, state, el) {
                 ${wb > 0 ? `<div class="h2h-seg orange" style="width:${pB}%">${wb}W</div>` : ""}
             </div>
         </div>`;
-    } else if (isBotVsBot && h2h.bot_a_name) {
+    } else if (!isSolo && isBotVsBot && h2h.bot_a_name) {
         h2hHtml = `<div class="pre-h2h"><div class="pre-h2h-title">First meeting!</div></div>`;
+    }
+
+    // Win probability bar
+    let winProbHtml = "";
+    const wp = m.win_probabilities || [];
+    if (wp.length === 2) {
+        const pBlue = (wp[0] * 100).toFixed(0);
+        const pOrange = (wp[1] * 100).toFixed(0);
+        winProbHtml = `
+        <div class="pre-h2h">
+            <div class="pre-h2h-title">Estimated Win Probability</div>
+            <div class="pre-h2h-bar">
+                <div class="h2h-seg blue" style="width:${pBlue}%">${pBlue}%</div>
+                <div class="h2h-seg orange" style="width:${pOrange}%">${pOrange}%</div>
+            </div>
+        </div>`;
     }
 
     el.innerHTML = `
@@ -218,16 +237,18 @@ function renderPregame(m, state, el) {
                 </div>
             </div>
             ${h2hHtml}
+            ${winProbHtml}
             <div class="pre-disclaimer">Bot MMR — does not reflect actual in-game rank</div>
         </div>`;
 }
 
-function botShowcase(bot, team) {
+function botShowcase(bot, team, isSolo) {
     const desc = bot.description || "";
     const fact = bot.fun_fact ? `<div class="pre-bot-fact">💡 ${escapeHtml(bot.fun_fact)}</div>` : "";
     const lang = bot.language ? `<span class="pre-bot-lang">${escapeHtml(bot.language)}</span>` : "";
-    const games = bot.matches_played === 1 ? "1 game" : `${bot.matches_played} games`;
-    const record = bot.matches_played > 0 ? `${bot.wins}W-${bot.losses}L` : "No games";
+    const record = isSolo
+        ? `${bot.matches_played} game${bot.matches_played !== 1 ? "s" : ""}`
+        : (bot.matches_played > 0 ? `${bot.wins}W-${bot.losses}L` : "No games");
     const logo = bot.logo_path
         ? `<img class="pre-bot-logo" src="/api/logo/${bot.id}" alt="">`
         : "";
@@ -257,17 +278,19 @@ function renderLiveBadges(m) {
     const blueEl = document.getElementById("live-blue");
     const orangeEl = document.getElementById("live-orange");
     const isSolo = m.mode && m.mode.startsWith("solo_");
-    blueEl.innerHTML = buildBadgeCards(m.team_blue, "blue", isSolo);
-    orangeEl.innerHTML = buildBadgeCards(m.team_orange, "orange", isSolo);
+    const deltas = m.mmr_deltas || {};
+    blueEl.innerHTML = buildBadgeCards(m.team_blue, "blue", isSolo, deltas);
+    orangeEl.innerHTML = buildBadgeCards(m.team_orange, "orange", isSolo, deltas);
 }
 
-function buildBadgeCards(team, teamClass, expandAll) {
+function buildBadgeCards(team, teamClass, expandAll, deltas) {
     if (expandAll) {
         // Solo queue: show each bot individually, no grouping
         return team.map(b => {
+            const deltaHtml = _deltaHtml(deltas, b.id);
             return `<div class="badge-card ${teamClass}">
                 <div class="badge-name">${escapeHtml(b.name)}</div>
-                <div class="badge-mmr">${formatMMR(b.mmr)}</div>
+                <div class="badge-mmr">${formatMMR(b.mmr)}${deltaHtml}</div>
                 <div class="badge-mmr-label">MMR</div>
             </div>`;
         }).join("");
@@ -282,12 +305,22 @@ function buildBadgeCards(team, teamClass, expandAll) {
     return grouped.map(g => {
         const b = g.bot;
         const suffix = g.count > 1 ? ` <span class="badge-count">×${g.count}</span>` : "";
+        const deltaHtml = _deltaHtml(deltas, b.id);
         return `<div class="badge-card ${teamClass}">
             <div class="badge-name">${escapeHtml(b.name)}${suffix}</div>
-            <div class="badge-mmr">${formatMMR(b.mmr)}</div>
+            <div class="badge-mmr">${formatMMR(b.mmr)}${deltaHtml}</div>
             <div class="badge-mmr-label">MMR</div>
         </div>`;
     }).join("");
+}
+
+function _deltaHtml(deltas, botId) {
+    if (!deltas || !(botId in deltas)) return "";
+    const d = deltas[botId];
+    if (d === 0) return "";
+    const cls = d > 0 ? "badge-delta-pos" : "badge-delta-neg";
+    const sign = d > 0 ? "+" : "";
+    return ` <span class="${cls}">${sign}${d}</span>`;
 }
 
 

@@ -140,9 +140,9 @@ The overlay is phase-aware and avoids in-game UI
 
 | Phase | What's shown |
 |---|---|
-| **Pre-match** | Full-screen showcase — bot names, authors, descriptions, fun facts, MMR, win/loss record, and head-to-head (standard modes) |
+| **Pre-match** | Full-screen showcase — bot names, authors, descriptions, fun facts, MMR, win/loss record, head-to-head (standard modes), and estimated win probabilities |
 | **Live** | Minimal badges in top-left (blue) and top-right (orange) showing bot names + MMR |
-| **Post-match** | Nothing — the in-game scoreboard is visible |
+| **Post-match** | Badges remain visible with MMR gain/loss deltas (game shows its own scoreboard) |
 | **Idle** | Full-screen all-modes leaderboard (one column per mode) |
 
 Transitions between phases use smooth crossfades.

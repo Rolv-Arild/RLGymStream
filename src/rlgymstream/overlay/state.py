@@ -39,6 +39,8 @@ class OverlayMatchState:
     score_orange: int = 0
     winner: str = ""
     match_number: int = 0
+    win_probabilities: list[float] = field(default_factory=list)  # [p_blue, p_orange]
+    mmr_deltas: dict[int, int] = field(default_factory=dict)  # bot_id → MMR change
     updated_at: float = field(default_factory=time.time)
 
 
