@@ -10,6 +10,9 @@ from rlgymstream.db.database import Database
 # PlackettLuce defaults: mu=25, sigma=25/3 ≈ 8.333
 _model = PlackettLuce()
 
+# Minimum sigma floor (matches Rocket League's minimum of 2.5).
+MIN_SIGMA = 2.5
+
 # ── Public helpers ────────────────────────────────────────────────────
 
 
@@ -91,6 +94,7 @@ def update_ratings(
             r.sigma = orange_results[bid].sigma
 
         r.matches_played += 1
+        r.sigma = max(r.sigma, MIN_SIGMA)
         db.save_rating(r)
 
 
