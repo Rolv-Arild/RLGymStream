@@ -195,8 +195,11 @@ def _solo_queue_pick(
                       priority_bot.name, bot_sigmas[priority_bot.id])
 
     for _ in range(_MAX_RETRIES):
-        blue = random.choices(bots, k=team_size)
-        orange = random.choices(bots, k=team_size)
+        blue = sorted(random.choices(bots, k=team_size))
+        orange = sorted(random.choices(bots, k=team_size))
+
+        if all([blue[i] == orange[i] for i in range(team_size)]):
+            continue
 
         # Accept/reject based on match evenness (full teams — solo queue
         # can have different bots, so deduplication would break symmetry)
