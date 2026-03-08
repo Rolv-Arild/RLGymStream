@@ -145,7 +145,8 @@ async def run(config: AppConfig) -> None:
             # Compute win probabilities
             blue_ids = [b.id for b in setup.team_blue]
             orange_ids = [b.id for b in setup.team_orange]
-            win_probs = predict_win_probability(db, mode.value, blue_ids, orange_ids)
+            win_probs = predict_win_probability(db, mode.value, blue_ids, orange_ids,
+                                                is_solo_queue=mode.is_solo_queue)
             match_state.win_probabilities = [round(p, 3) for p in win_probs]
 
             overlay_state.update_match(match_state)
@@ -198,7 +199,8 @@ async def run(config: AppConfig) -> None:
             db.save_match(match_record)
 
             # Update OpenSkill ratings
-            update_ratings(db, mode.value, blue_ids, orange_ids, result.winner)
+            update_ratings(db, mode.value, blue_ids, orange_ids, result.winner,
+                          is_solo_queue=mode.is_solo_queue)
 
             # Compute MMR deltas (post - pre)
             mmr_deltas: dict[int, int] = {}

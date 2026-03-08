@@ -198,7 +198,8 @@ def _solo_queue_pick(
         blue = random.choices(bots, k=team_size)
         orange = random.choices(bots, k=team_size)
 
-        # Accept/reject based on match evenness
+        # Accept/reject based on match evenness (full teams — solo queue
+        # can have different bots, so deduplication would break symmetry)
         blue_ratings = [bot_os[b.id] for b in blue]
         orange_ratings = [bot_os[b.id] for b in orange]
         probs = _os_model.predict_win([blue_ratings, orange_ratings])
