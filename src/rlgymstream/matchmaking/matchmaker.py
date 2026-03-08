@@ -8,6 +8,7 @@ matchups and gracefully falls off for mismatches.
 from __future__ import annotations
 
 import random
+import re
 from dataclasses import dataclass
 
 from openskill.models.weng_lin.plackett_luce import PlackettLuceRating
@@ -23,12 +24,35 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def format_map_name(raw: str) -> str:
+    """Convert a map name like 'ForbiddenTemple_FireAndIce' to
+    'Forbidden Temple (Fire And Ice)'.
+
+    Inserts spaces before uppercase letters that follow a lowercase letter,
+    e.g. 'NeoTokyo' → 'Neo Tokyo', 'DFHStadium' → 'DFH Stadium'.
+    Underscore separates the base from a parenthetical variant.
+    """
+    def _split(s: str) -> str:
+        return re.sub(r'(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])', ' ', s)
+
+    parts = raw.split("_", 1)
+    base = _split(parts[0])
+    if len(parts) == 1:
+        return base
+    variant = _split(parts[1])
+    return f"{base} ({variant})"
+
+
 @dataclass
 class MatchSetup:
     mode: MatchMode
     team_blue: list[Bot]
     team_orange: list[Bot]
     map_name: str = "DFHStadium"
+
+    @property
+    def display_map_name(self) -> str:
+        return format_map_name(self.map_name)
 
 
 def pick_match(

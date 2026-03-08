@@ -137,7 +137,7 @@ async def run(config: AppConfig) -> None:
                 [b.name for b in setup.team_blue],
                 [b.name for b in setup.team_orange],
             )
-            logger.info("Map: %s", setup.map_name)
+            logger.info("Map: %s", setup.display_map_name)
 
             # ── Pre-game phase ───────────────────────────────────────
             match_state = _build_match_state(setup, match_counter, "pregame", db)
@@ -227,7 +227,7 @@ async def run(config: AppConfig) -> None:
                 "score_orange": result.score_orange,
                 "winner": result.winner,
                 "mode": mode.display_name,
-                "map": setup.map_name,
+                "map": setup.display_map_name,
             })
 
             # Refresh leaderboards and show the idle/leaderboard screen.
@@ -281,7 +281,7 @@ def _build_match_state(
         phase=phase,
         mode=setup.mode.value,
         mode_display=setup.mode.display_name,
-        map_name=setup.map_name,
+        map_name=setup.display_map_name,
         team_blue=[bot_info(b, setup.mode.value) for b in setup.team_blue],
         team_orange=[bot_info(b, setup.mode.value) for b in setup.team_orange],
         match_number=match_number,
