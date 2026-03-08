@@ -7,19 +7,18 @@ matchups and gracefully falls off for mismatches.
 
 from __future__ import annotations
 
+import logging
 import random
 import re
 from dataclasses import dataclass
 
 from openskill.models.weng_lin.plackett_luce import PlackettLuceRating
+from rlbot.utils.maps import STANDARD_MAPS
 
 from rlgymstream.config import MatchMode
 from rlgymstream.db.database import Database
 from rlgymstream.db.models import Bot
 from rlgymstream.matchmaking.ratings import make_rating, _model as _os_model
-from rlbot.utils.maps import STANDARD_MAPS
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +31,7 @@ def format_map_name(raw: str) -> str:
     e.g. 'NeoTokyo' → 'Neo Tokyo', 'DFHStadium' → 'DFH Stadium'.
     Underscore separates the base from a parenthetical variant.
     """
+
     def _split(s: str) -> str:
         return re.sub(r'(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])', ' ', s)
 
@@ -56,11 +56,11 @@ class MatchSetup:
 
 
 def pick_match(
-    db: Database,
-    mode: MatchMode,
-    map_name: str | None = None,
-    last_map: str | None = None,
-    sigma_priority_chance: float = 0.0,
+        db: Database,
+        mode: MatchMode,
+        map_name: str | None = None,
+        last_map: str | None = None,
+        sigma_priority_chance: float = 0.0,
 ) -> MatchSetup | None:
     """Select bots for a match in the given mode.
 
@@ -92,12 +92,12 @@ _MAX_RETRIES = 1000
 
 
 def _standard_pick(
-    db: Database,
-    bots: list[Bot],
-    mode: MatchMode,
-    team_size: int,
-    map_name: str,
-    sigma_priority_chance: float,
+        db: Database,
+        bots: list[Bot],
+        mode: MatchMode,
+        team_size: int,
+        map_name: str,
+        sigma_priority_chance: float,
 ) -> MatchSetup | None:
     """Standard mode: each team is one bot (duplicated to fill team_size).
 
@@ -125,7 +125,7 @@ def _standard_pick(
     use_sigma_priority = random.random() < sigma_priority_chance
     if use_sigma_priority:
         logger.debug("Sigma priority active: looking for %s (σ=%.2f)",
-                      priority_bot.name, bot_sigmas[priority_bot.id])
+                     priority_bot.name, bot_sigmas[priority_bot.id])
 
     for _ in range(_MAX_RETRIES):
         a, b = random.sample(bots, 2)
@@ -165,14 +165,15 @@ def _standard_pick(
 
 
 def _solo_queue_pick(
-    db: Database,
-    bots: list[Bot],
-    mode: MatchMode,
-    team_size: int,
-    map_name: str,
-    sigma_priority_chance: float,
+        db: Database,
+        bots: list[Bot],
+        mode: MatchMode,
+        team_size: int,
+        map_name: str,
+        sigma_priority_chance: float,
 ) -> MatchSetup:
-    """Solo-queue mode: duplicates allowed.
+    """Solo-queue mode: duplicates allowed, but the two teams cannot be
+    identical (same bots in the same quantities).
 
     Uses accept/reject sampling — generate random teams, accept with
     probability p*(1-p)/0.25.
@@ -192,11 +193,22 @@ def _solo_queue_pick(
     use_sigma_priority = random.random() < sigma_priority_chance
     if use_sigma_priority:
         logger.debug("Sigma priority (solo): looking for %s (σ=%.2f)",
-                      priority_bot.name, bot_sigmas[priority_bot.id])
+                     priority_bot.name, bot_sigmas[priority_bot.id])
 
-    for _ in range(_MAX_RETRIES):
+    retries = 0
+    while True:
         blue = random.choices(bots, k=team_size)
         orange = random.choices(bots, k=team_size)
+
+        # Reject if teams are identical (same bots in same quantities)
+        if sorted(b.id for b in blue) == sorted(b.id for b in orange):
+            continue
+
+        # Additionally require the highest-sigma bot when active
+        if use_sigma_priority:
+            all_ids = {b.id for b in blue} | {b.id for b in orange}
+            if priority_bot.id not in all_ids:
+                continue
 
         # Accept/reject based on match evenness (full teams — solo queue
         # can have different bots, so deduplication would break symmetry)
@@ -206,32 +218,21 @@ def _solo_queue_pick(
         p = probs[0]
         weight = p * (1 - p)
         if random.random() >= weight / _MAX_WEIGHT:
+            retries += 1
+            if retries >= _MAX_RETRIES:
+                break
             continue
-
-        # Additionally require the highest-sigma bot when active
-        if use_sigma_priority:
-            all_ids = {b.id for b in blue} | {b.id for b in orange}
-            if priority_bot.id not in all_ids:
-                continue
-
-        return MatchSetup(
-            mode=mode,
-            team_blue=blue,
-            team_orange=orange,
-            map_name=map_name,
-        )
-
-    # Fallback: accept any matchup
-    blue = random.choices(bots, k=team_size)
-    orange = random.choices(bots, k=team_size)
-    return MatchSetup(mode=mode, team_blue=blue, team_orange=orange, map_name=map_name)
-
+    return MatchSetup(
+        mode=mode,
+        team_blue=blue,
+        team_orange=orange,
+        map_name=map_name,
+    )
 
 
 def pick_mode(
-    rotation: list[MatchMode],
-    counter: int,
+        rotation: list[MatchMode],
+        counter: int,
 ) -> MatchMode:
     """Randomly select a mode from the rotation."""
     return random.choice(rotation)
-

@@ -39,11 +39,9 @@ class MatchMode(str, Enum):
     def min_bots_required(self) -> int:
         """Minimum distinct bots needed.
 
-        Standard modes use full teams of one bot, so only 2 distinct bots
-        are needed.  Solo-queue allows dupes, so just 1.
+        All modes need at least 2 distinct bots — standard modes use one
+        bot per team, and solo-queue rejects identical team compositions.
         """
-        if self.is_solo_queue:
-            return 1
         return 2
 
 
