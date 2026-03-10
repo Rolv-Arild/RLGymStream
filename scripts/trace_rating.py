@@ -64,12 +64,12 @@ for label, ratings in test_cases:
 
         if len(posteriors) == 1:
             mu_f, sig_f = posteriors[0]
-            d_mmr = round(20 * ((mu_f - 3 * sig_f) - old_display))
+            d_mmr = round(20 * (mu_f - mu_0))
             print(f"  {name:<5} {'(single)':<12} {mu_f:8.2f} {sig_f:8.4f} {d_mmr:+6d}")
         else:
             for method_name, method in [("rms_avg", consolidate_rms_avg), ("precision", consolidate_precision)]:
                 mu_f, sig_f = method(mu_0, sig_0, posteriors)
-                d_mmr = round(20 * ((mu_f - 3 * sig_f) - old_display))
+                d_mmr = round(20 * (mu_f - mu_0))
                 print(f"  {name:<5} {method_name:<12} {mu_f:8.2f} {sig_f:8.4f} {d_mmr:+6d}")
 
 print()
@@ -87,9 +87,8 @@ for sig in [3.0, 5.0, 8.33]:
     mu_rms, sig_rms = consolidate_rms_avg(25, sig, posteriors)
     mu_prec, sig_prec = consolidate_precision(25, sig, posteriors)
 
-    old_display = 25 - 3 * sig
-    d_rms = round(20 * ((mu_rms - 3 * sig_rms) - old_display))
-    d_prec = round(20 * ((mu_prec - 3 * sig_prec) - old_display))
+    d_rms = round(20 * (mu_rms - 25))
+    d_prec = round(20 * (mu_prec - 25))
 
     print(f"  sigma={sig:.2f}: RMS avg → MMR {d_rms:+d}, precision → MMR {d_prec:+d}")
 

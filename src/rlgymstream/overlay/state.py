@@ -17,8 +17,7 @@ class OverlayBotInfo:
     description: str = ""
     fun_fact: str = ""
     language: str = ""
-    rating: float = 0.0
-    mmr: int = 1000         # 20 * rating + 1000
+    mmr: int = 1000         # 20 * mu + 500
     mu: float = 25.0
     sigma: float = 8.333
     matches_played: int = 0
@@ -49,7 +48,6 @@ class OverlayLeaderboardEntry:
     rank: int = 0
     bot_name: str = ""
     author: str = ""
-    rating: float = 0.0
     mmr: int = 1000
     mu: float = 0.0
     sigma: float = 0.0

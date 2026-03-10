@@ -149,7 +149,7 @@ Transitions between phases use smooth crossfades.
 
 ### MMR display
 
-MMR is displayed as **20 × rating + 1000** (Rocket League-style) with a
+MMR is displayed as **20 × μ + 500** (Rocket League-style) with a
 disclaimer that it does not reflect actual in-game rank. New bots start at
 1000 MMR.
 
@@ -192,11 +192,12 @@ Uses [OpenSkill](https://openskill.me/en/stable/) with the
 **Plackett-Luce** model:
 
 - Each bot starts at **μ=25, σ=8.33** per mode
-- Display rating = **μ − 3σ** (conservative estimate)
-- MMR = **20 × display rating + 1000**
+- MMR = **20 × μ + 500** (purely cosmetic, does not reflect in-game rank)
+- Minimum σ floor of **2.5** (matches Rocket League)
 - Supports team-based rating updates (2v2, 3v3)
-- Bots appearing on both teams in solo queue receive the average of their
-  win-side and loss-side rating updates
+- In standard modes, teams are deduplicated for rating (same bot × N → one update)
+- Bots appearing on both teams in solo queue have their posteriors consolidated
+  using **precision-based merging** (sum μ deltas, sum 1/σ² deltas from the prior)
 - **Draws are skipped** — no rating change (draws shouldn't occur in normal
   Rocket League play and likely indicate an error)
 - Win probability prediction via `model.predict_win()`

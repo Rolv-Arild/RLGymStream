@@ -18,12 +18,6 @@ MIN_SIGMA = 2.5
 
 # ── Public helpers ────────────────────────────────────────────────────
 
-
-def ordinal(mu: float, sigma: float) -> float:
-    """Conservative display rating  (mu − 3·sigma)."""
-    return mu - 3 * sigma
-
-
 def make_rating(mu: float = 25.0, sigma: float = 8.333333333333334) -> PlackettLuceRating:
     """Create an openskill rating object from stored values."""
     return _model.rating(mu=mu, sigma=sigma)
@@ -160,15 +154,13 @@ def get_leaderboard(db: Database, mode: str) -> list[dict]:
             continue
         assert bot.id is not None
         r = db.get_rating(bot.id, mode)
-        display = ordinal(r.mu, r.sigma)
         result.append({
             "bot": bot,
             "rating": r,
-            "display_rating": round(display, 1),
             "mu": round(r.mu, 1),
             "sigma": round(r.sigma, 1),
         })
-    result.sort(key=lambda x: x["display_rating"], reverse=True)
+    result.sort(key=lambda x: x["mu"], reverse=True)
     return result
 
 

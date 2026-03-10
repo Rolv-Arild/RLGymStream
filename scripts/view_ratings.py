@@ -22,10 +22,10 @@ def main():
         print(f"\n=== {mode} ===")
         print(f"{'Bot':<25} {'mu':>8} {'sigma':>8} {'mu-3s':>8} {'MMR':>6} {'Games':>5}")
         print("-" * 65)
-        for r in sorted(ratings, key=lambda x: x.mu - 3 * x.sigma, reverse=True):
+        for r in sorted(ratings, key=lambda x: x.mu, reverse=True):
             name = bots.get(r.bot_id, f"#{r.bot_id}")
             display = r.mu - 3 * r.sigma
-            mmr = round(20 * display + 1000)
+            mmr = round(20 * r.mu + 500)
             print(f"{name:<25} {r.mu:8.2f} {r.sigma:8.2f} {display:8.2f} {mmr:6d} {r.matches_played:5d}")
 
 

@@ -49,10 +49,6 @@ class Rating:
     sigma: float = 8.333333333333334  # OpenSkill default (25/3)
     matches_played: int = 0
 
-    @property
-    def display_rating(self) -> float:
-        return self.mu - 3 * self.sigma
-
 
 @dataclass
 class Match:

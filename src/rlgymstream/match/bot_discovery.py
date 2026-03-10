@@ -30,9 +30,10 @@ _TAG_TO_MODES = {
 
 def discover_bots(sources: list[BotSource], db: Database) -> list[Bot]:
     """Scan every *BotSource* for bot.toml files, validate them, and upsert
-    into the DB.  Returns the full list of enabled bots after discovery.
+    into the DB.  Bots no longer present in any source are disabled.
+    Returns the full list of enabled bots after discovery.
     """
-    found = 0
+    found_names: set[str] = set()
     for source in sources:
         root = source.path.resolve()
         if not root.exists():
@@ -42,12 +43,20 @@ def discover_bots(sources: list[BotSource], db: Database) -> list[Bot]:
         toml_paths = _collect_toml_paths(root, source)
         for toml_path in toml_paths:
             try:
-                _register_bot(toml_path, db)
-                found += 1
+                bot = _register_bot(toml_path, db)
+                found_names.add(bot.name)
             except Exception:
                 logger.warning("Skipping invalid bot config: %s", toml_path, exc_info=True)
 
-    logger.info("Discovered %d valid bot config(s)", found)
+    # Disable bots that are no longer in any source
+    all_bots = db.get_all_bots(enabled_only=False)
+    for bot in all_bots:
+        if bot.name not in found_names and bot.enabled:
+            bot.enabled = False
+            db.upsert_bot(bot)
+            logger.info("Disabled bot no longer in config: %s", bot.name)
+
+    logger.info("Discovered %d valid bot config(s)", len(found_names))
     return db.get_all_bots(enabled_only=True)
 
 
@@ -80,9 +89,9 @@ def _collect_toml_paths(root: Path, source: BotSource) -> list[Path]:
         return paths
 
 
-def _register_bot(toml_path: Path, db: Database) -> None:
+def _register_bot(toml_path: Path, db: Database) -> Bot:
     """Validate a single bot.toml with RLBot's parser, extract metadata
-    including mode tags, then upsert into the DB."""
+    including mode tags, then upsert into the DB.  Returns the Bot."""
     abs_path = toml_path.resolve()
 
     # ── Validate with RLBot ──────────────────────────────────────────
@@ -135,3 +144,4 @@ def _register_bot(toml_path: Path, db: Database) -> None:
     db.upsert_bot(bot)
     mode_info = supported_modes or "all modes"
     logger.debug("Registered bot: %s (by %s) [%s] @ %s", name, author, mode_info, abs_path)
+    return bot

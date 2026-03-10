@@ -208,7 +208,7 @@ async def run(config: AppConfig) -> None:
             for b in setup.team_blue + setup.team_orange:
                 assert b.id is not None
                 r = db.get_rating(b.id, mode.value)
-                post_mmr = _rating_to_mmr(round(r.display_rating, 1))
+                post_mmr = _rating_to_mmr(r.mu)
                 mmr_deltas[b.id] = post_mmr - pre_mmrs.get(b.id, post_mmr)
 
             # Update match state with postgame info (badges stay visible)
@@ -261,7 +261,6 @@ def _build_match_state(
     def bot_info(bot, mode_val):
         assert bot.id is not None
         r = db.get_rating(bot.id, mode_val)
-        display = round(r.display_rating, 1)
         wins, losses, _draws = db.get_bot_record(bot.id, mode_val)
         return OverlayBotInfo(
             id=bot.id,
@@ -270,8 +269,7 @@ def _build_match_state(
             description=bot.description,
             fun_fact=bot.fun_fact,
             language=bot.language,
-            rating=display,
-            mmr=_rating_to_mmr(display),
+            mmr=_rating_to_mmr(r.mu),
             mu=round(r.mu, 1),
             sigma=round(r.sigma, 1),
             matches_played=r.matches_played,
@@ -304,8 +302,7 @@ def _refresh_leaderboards(
                 rank=i + 1,
                 bot_name=entry["bot"].name,
                 author=entry["bot"].author,
-                rating=entry["display_rating"],
-                mmr=_rating_to_mmr(entry["display_rating"]),
+                mmr=_rating_to_mmr(entry["mu"]),
                 mu=entry["mu"],
                 sigma=entry["sigma"],
                 matches_played=entry["rating"].matches_played,
@@ -346,13 +343,13 @@ async def _sleep_or_stop(seconds: float, stop_event: asyncio.Event) -> None:
         pass
 
 
-def _rating_to_mmr(rating: float) -> int:
-    """Convert OpenSkill display rating to Rocket League–style MMR.
+def _rating_to_mmr(mu: float) -> int:
+    """Convert OpenSkill mu to Rocket League–style MMR.
 
-    Formula: MMR = 20 × rating + 1000.  This is purely cosmetic and does
+    Formula: MMR = 20 × mu + 500.  This is purely cosmetic and does
     NOT reflect the bots' actual in-game rank.
     """
-    return round(20 * rating + 1000)
+    return round(20 * mu + 500)
 
 
 if __name__ == "__main__":

@@ -99,13 +99,13 @@ def main():
                 print(f"\n=== {mode} ===")
                 print(f"{'Bot':<25} {'old MMR':>8} {'new MMR':>8} {'delta':>7}  {'old σ':>7} {'new σ':>7} {'Δσ':>7}")
                 print("-" * 80)
-                for key in sorted(mode_keys, key=lambda k: -(new_ratings.get(k, Rating()).mu - 3 * new_ratings.get(k, Rating()).sigma)):
+                for key in sorted(mode_keys, key=lambda k: -new_ratings.get(k, Rating()).mu):
                     bot_id, _ = key
                     name = bots.get(bot_id, f"#{bot_id}")
                     old = old_ratings.get(key, Rating())
                     new = new_ratings.get(key, Rating())
-                    old_mmr = round(20 * (old.mu - 3 * old.sigma) + 1000)
-                    new_mmr = round(20 * (new.mu - 3 * new.sigma) + 1000)
+                    old_mmr = round(20 * old.mu + 500)
+                    new_mmr = round(20 * new.mu + 500)
                     delta = new_mmr - old_mmr
                     d_sigma = new.sigma - old.sigma
                     print(f"{name:<25} {old_mmr:8d} {new_mmr:8d} {delta:+7d}  {old.sigma:7.2f} {new.sigma:7.2f} {d_sigma:+7.2f}")
