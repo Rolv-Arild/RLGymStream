@@ -1,8 +1,9 @@
 """Matchmaking – select bots for a given mode.
 
-Matchup probability is proportional to  p_win × (1 − p_win),  i.e. the
-probability that a best-of-2 series ends 1-1.  This maximises at 50/50
-matchups and gracefully falls off for mismatches.
+A random threshold is rolled once per match, then matchups are generated
+until one has  p_win × (1 − p_win) / 0.25  ≥  threshold.  This favours
+balanced matchups while allowing occasional mismatches.  Every 1000 failed
+attempts the threshold is squared to guarantee convergence.
 """
 
 from __future__ import annotations
@@ -101,8 +102,9 @@ def _standard_pick(
 ) -> MatchSetup | None:
     """Standard mode: each team is one bot (duplicated to fill team_size).
 
-    Uses accept/reject sampling — generate a random pair, accept with
-    probability p*(1-p)/0.25 so evenly-matched bots play more often.
+    Uses roll-once accept/reject sampling — a random threshold is chosen
+    once, then matchups are generated until one has p*(1-p)/0.25 ≥ threshold.
+    Every 1000 failed attempts the threshold is squared to ensure convergence.
 
     With *sigma_priority_chance* probability, an additional criterion is
     applied: the matchup must also include the highest-sigma bot,
@@ -124,10 +126,14 @@ def _standard_pick(
     priority_bot = max(bots, key=lambda b: bot_sigmas[b.id])
     use_sigma_priority = random.random() < sigma_priority_chance
     if use_sigma_priority:
-        logger.debug("Sigma priority active: looking for %s (σ=%.2f)",
+        logger.debug("Sigma priority active: looking for %s (sigma=%.2f)",
                      priority_bot.name, bot_sigmas[priority_bot.id])
 
-    for _ in range(_MAX_RETRIES):
+    threshold = random.random()
+    for attempt in range(_MAX_RETRIES):
+        if attempt > 0 and attempt % 1000 == 0:
+            threshold *= threshold
+
         a, b = random.sample(bots, 2)
         os_a = bot_ratings[a.id]
         os_b = bot_ratings[b.id]
@@ -136,7 +142,7 @@ def _standard_pick(
         probs = _os_model.predict_win([[os_a], [os_b]])
         p = probs[0]
         weight = p * (1 - p)
-        if random.random() >= weight / _MAX_WEIGHT:
+        if weight / _MAX_WEIGHT < threshold:
             continue
 
         # Additionally require the highest-sigma bot when active
@@ -175,8 +181,9 @@ def _solo_queue_pick(
     """Solo-queue mode: duplicates allowed, but the two teams cannot be
     identical (same bots in the same quantities).
 
-    Uses accept/reject sampling — generate random teams, accept with
-    probability p*(1-p)/0.25.
+    Uses roll-once accept/reject sampling — a random threshold is chosen
+    once, then matchups are generated until one has p*(1-p)/0.25 ≥ threshold.
+    Every 1000 failed attempts the threshold is squared to ensure convergence.
 
     With *sigma_priority_chance* probability, an additional criterion is
     applied: the matchup must also include the highest-sigma bot.
@@ -192,11 +199,14 @@ def _solo_queue_pick(
     priority_bot = max(bots, key=lambda b: bot_sigmas[b.id])
     use_sigma_priority = random.random() < sigma_priority_chance
     if use_sigma_priority:
-        logger.debug("Sigma priority (solo): looking for %s (σ=%.2f)",
+        logger.debug("Sigma priority (solo): looking for %s (sigma=%.2f)",
                      priority_bot.name, bot_sigmas[priority_bot.id])
 
-    retries = 0
-    while True:
+    threshold = random.random()
+    for attempt in range(_MAX_RETRIES):
+        if attempt > 0 and attempt % 1000 == 0:
+            threshold *= threshold
+
         blue = random.choices(bots, k=team_size)
         orange = random.choices(bots, k=team_size)
 
@@ -210,18 +220,21 @@ def _solo_queue_pick(
             if priority_bot.id not in all_ids:
                 continue
 
-        # Accept/reject based on match evenness (full teams — solo queue
-        # can have different bots, so deduplication would break symmetry)
+        # Accept/reject based on match evenness
         blue_ratings = [bot_os[b.id] for b in blue]
         orange_ratings = [bot_os[b.id] for b in orange]
         probs = _os_model.predict_win([blue_ratings, orange_ratings])
         p = probs[0]
         weight = p * (1 - p)
-        if random.random() >= weight / _MAX_WEIGHT:
-            retries += 1
-            if retries >= _MAX_RETRIES:
-                break
-            continue
+        if weight / _MAX_WEIGHT >= threshold:
+            return MatchSetup(
+                mode=mode,
+                team_blue=blue,
+                team_orange=orange,
+                map_name=map_name,
+            )
+
+    # Fallback: accept the last generated matchup
     return MatchSetup(
         mode=mode,
         team_blue=blue,
