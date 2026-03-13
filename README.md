@@ -149,9 +149,9 @@ Transitions between phases use smooth crossfades.
 
 ### MMR display
 
-MMR is displayed as **20 × μ + 500** (Rocket League-style) with a
+MMR is displayed as **20 × μ + 100** (the exact formula Rocket League uses) with a
 disclaimer that it does not reflect actual in-game rank. New bots start at
-1000 MMR.
+600 MMR (with default μ=25).
 
 ## API Endpoints
 
@@ -192,7 +192,7 @@ Uses [OpenSkill](https://openskill.me/en/stable/) with the
 **Plackett-Luce** model:
 
 - Each bot starts at **μ=25, σ=8.33** per mode
-- MMR = **20 × μ + 500** (purely cosmetic, does not reflect in-game rank)
+- MMR = **20 × μ + 100** (the exact formula Rocket League uses, does not reflect in-game rank)
 - Minimum σ floor of **2.5** (matches Rocket League)
 - Supports team-based rating updates (2v2, 3v3)
 - In standard modes, teams are deduplicated for rating (same bot × N → one update)
@@ -201,13 +201,19 @@ Uses [OpenSkill](https://openskill.me/en/stable/) with the
 - **Draws are skipped** — no rating change (draws shouldn't occur in normal
   Rocket League play and likely indicate an error)
 - Win probability prediction via `model.predict_win()`
+- **Anchored ratings** — bots can be fixed at a known μ/σ (e.g. from
+  human calibration) via `[[anchored_ratings]]` in the config.  They still
+  participate in matches (opponents are rated normally), but their own
+  μ/σ never change.  Anchors can be global or per-mode.  They bypass
+  the minimum σ floor.  Anchored bots are marked with 📌 in the overlay.
 
 ## Matchmaking
 
-Matchups are selected via **accept/reject sampling**: a random matchup is
-generated, then accepted with probability proportional to `p × (1 − p)`
-(where `p` is the predicted win probability for one side).  This maximises
-at 50/50 matchups and gracefully falls off for mismatches.
+A random threshold is rolled once per match, then random matchups are
+generated until one has `p × (1 − p) / 0.25 ≥ threshold` (where `p` is
+the predicted win probability for one side).  This favours balanced
+matchups while allowing occasional mismatches for variety.  Every 1000
+failed attempts the threshold is squared to guarantee convergence.
 
 With `sigma_priority_chance` probability, an additional constraint is added:
 the matchup must also include the bot with the highest σ (most uncertain

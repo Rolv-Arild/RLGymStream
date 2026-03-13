@@ -16,11 +16,34 @@ _model = PlackettLuce()
 # Minimum sigma floor (matches Rocket League's minimum of 2.5).
 MIN_SIGMA = 2.5
 
+# Configurable per-mode defaults for new bots (set via configure_defaults).
+_DEFAULT_MU: dict[str, float] = {}
+_DEFAULT_SIGMA: dict[str, float] = {}
+
+
+def configure_defaults(mu: dict[str, float], sigma: dict[str, float]) -> None:
+    """Override the starting mu/sigma for new bots (per-mode dicts)."""
+    global _DEFAULT_MU, _DEFAULT_SIGMA
+    _DEFAULT_MU = dict(mu)
+    _DEFAULT_SIGMA = dict(sigma)
+
+
+def get_default_mu(mode: str) -> float:
+    """Return the configured starting mu for a mode."""
+    return _DEFAULT_MU.get(mode, 25.0)
+
+
+def get_default_sigma(mode: str) -> float:
+    """Return the configured starting sigma for a mode."""
+    return _DEFAULT_SIGMA.get(mode, 8.333333333333334)
+
+
 # ── Public helpers ────────────────────────────────────────────────────
 
-def make_rating(mu: float = 25.0, sigma: float = 8.333333333333334) -> PlackettLuceRating:
+def make_rating(mu: float | None = None, sigma: float | None = None) -> PlackettLuceRating:
     """Create an openskill rating object from stored values."""
-    return _model.rating(mu=mu, sigma=sigma)
+    return _model.rating(mu=mu if mu is not None else 25.0,
+                         sigma=sigma if sigma is not None else 8.333333333333334)
 
 
 def update_ratings(
@@ -30,6 +53,7 @@ def update_ratings(
     team_orange_ids: list[int],
     winner: str,  # "blue", "orange", "draw"
     is_solo_queue: bool = False,
+    anchored_bot_ids: set[int] | None = None,
 ) -> None:
     """Fetch current ratings, run OpenSkill update, persist new values.
 
@@ -43,7 +67,13 @@ def update_ratings(
     When a bot occupies multiple slots (e.g. on both teams in solo queue),
     its posteriors are consolidated by summing the mu deltas and precision
     (1/σ²) deltas from each slot relative to the prior.
+
+    Bots in *anchored_bot_ids* participate in the rate() call (so opponents
+    are rated correctly against them) but their mu/sigma are never updated.
+    Their matches_played counter is still incremented.
     """
+    if anchored_bot_ids is None:
+        anchored_bot_ids = set()
     if winner == "draw":
         return
 
@@ -77,10 +107,11 @@ def update_ratings(
 
         for bid, posteriors in bot_posteriors.items():
             r = db.get_rating(bid, mode)
-            mu_0, sigma_0 = priors[bid]
-            r.mu, r.sigma = _consolidate_posteriors(mu_0, sigma_0, posteriors)
+            if bid not in anchored_bot_ids:
+                mu_0, sigma_0 = priors[bid]
+                r.mu, r.sigma = _consolidate_posteriors(mu_0, sigma_0, posteriors)
+                r.sigma = max(r.sigma, MIN_SIGMA)
             r.matches_played += 1
-            r.sigma = max(r.sigma, MIN_SIGMA)
             db.save_rating(r)
     else:
         # Deduplicated — same bot duplicated to fill team
@@ -102,15 +133,17 @@ def update_ratings(
 
         for bid, rating in zip(blue_unique, new_blue):
             r = db.get_rating(bid, mode)
-            r.mu = rating.mu
-            r.sigma = max(rating.sigma, MIN_SIGMA)
+            if bid not in anchored_bot_ids:
+                r.mu = rating.mu
+                r.sigma = max(rating.sigma, MIN_SIGMA)
             r.matches_played += 1
             db.save_rating(r)
 
         for bid, rating in zip(orange_unique, new_orange):
             r = db.get_rating(bid, mode)
-            r.mu = rating.mu
-            r.sigma = max(rating.sigma, MIN_SIGMA)
+            if bid not in anchored_bot_ids:
+                r.mu = rating.mu
+                r.sigma = max(rating.sigma, MIN_SIGMA)
             r.matches_played += 1
             db.save_rating(r)
 

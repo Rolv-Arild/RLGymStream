@@ -61,8 +61,22 @@ class BotSource:
 
 
 @dataclass
+class AnchoredRating:
+    """A fixed mu/sigma for a bot that should never change.
+
+    If *modes* is empty, the anchor applies to every mode.
+    Otherwise it only applies to the listed modes (e.g. ["1v1", "2v2"]).
+    """
+    bot_name: str = ""
+    mu: float = 25.0
+    sigma: float = 8.333333333333334
+    modes: list[str] = field(default_factory=list)
+
+
+@dataclass
 class AppConfig:
     bot_sources: list[BotSource] = field(default_factory=list)
+    anchored_ratings: list[AnchoredRating] = field(default_factory=list)
     db_path: Path = field(default_factory=lambda: Path("data/rlgymstream.db"))
     overlay_host: str = "127.0.0.1"
     overlay_port: int = 8080
@@ -74,6 +88,16 @@ class AppConfig:
     leaderboard_delay: float = 15.0 # seconds to show leaderboard between matches
     sigma_priority_chance: float = 0.1  # chance to force highest-sigma bot into a match
     mercy_goal_diff: int = 8            # end match early if goal diff reaches this
+    default_mu: dict[str, float] = field(default_factory=lambda: {})   # mode → starting mu (fallback: 25.0)
+    default_sigma: dict[str, float] = field(default_factory=lambda: {})  # mode → starting sigma (fallback: 25/3)
+
+    def get_default_mu(self, mode: str) -> float:
+        """Return the starting mu for a mode, falling back to 25.0."""
+        return self.default_mu.get(mode, 25.0)
+
+    def get_default_sigma(self, mode: str) -> float:
+        """Return the starting sigma for a mode, falling back to 25/3."""
+        return self.default_sigma.get(mode, 8.333333333333334)
 
     @classmethod
     def from_toml(cls, path: Path | str = "rlgymstream.toml") -> "AppConfig":
@@ -83,6 +107,9 @@ class AppConfig:
 
             overlay_port = 8080
             mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
+
+            # Per-mode starting mu (or a single number for all modes)
+            default_mu = {"1v1" = 35.0, "2v2" = 60.0}
 
             [[bot_sources]]
             path = "C:/repos/RLGymPack"
@@ -97,6 +124,14 @@ class AppConfig:
             path = "C:/repos/my-bots"
             # empty bots list → use every bot.toml found recursively
             exclude = ["broken_bot"]
+
+            # Anchor a bot's rating so it never changes.
+            # Other bots are still rated normally against it.
+            [[anchored_ratings]]
+            bot_name = "Nexto"
+            mu = 30.5
+            sigma = 3.0
+            # modes = ["1v1", "2v2"]  # optional: only anchor these modes (default: all)
         """
         path = Path(path)
         cfg = cls()
@@ -121,6 +156,19 @@ class AppConfig:
                 cfg.sigma_priority_chance = float(data["sigma_priority_chance"])
             if "mercy_goal_diff" in data:
                 cfg.mercy_goal_diff = int(data["mercy_goal_diff"])
+            if "default_mu" in data:
+                val = data["default_mu"]
+                if isinstance(val, dict):
+                    cfg.default_mu = {k: float(v) for k, v in val.items()}
+                else:
+                    # Single value → apply to all modes
+                    cfg.default_mu = {m.value: float(val) for m in MatchMode}
+            if "default_sigma" in data:
+                val = data["default_sigma"]
+                if isinstance(val, dict):
+                    cfg.default_sigma = {k: float(v) for k, v in val.items()}
+                else:
+                    cfg.default_sigma = {m.value: float(val) for m in MatchMode}
             if "mode_rotation" in data:
                 cfg.mode_rotation = [MatchMode(m) for m in data["mode_rotation"]]
             else:
@@ -131,6 +179,14 @@ class AppConfig:
                     path=Path(src["path"]),
                     bots=src.get("bots", []),
                     exclude=src.get("exclude", []),
+                ))
+
+            for anchor in data.get("anchored_ratings", []):
+                cfg.anchored_ratings.append(AnchoredRating(
+                    bot_name=anchor["bot_name"],
+                    mu=float(anchor["mu"]),
+                    sigma=float(anchor.get("sigma", 8.333333333333334)),
+                    modes=anchor.get("modes", []),
                 ))
         else:
             # Fallback: use a local bots/ directory

@@ -17,13 +17,14 @@ class OverlayBotInfo:
     description: str = ""
     fun_fact: str = ""
     language: str = ""
-    mmr: int = 1000         # 20 * mu + 500
+    mmr: int = 600          # 20 * mu + 100
     mu: float = 25.0
     sigma: float = 8.333
     matches_played: int = 0
     wins: int = 0
     losses: int = 0
     logo_path: str | None = None
+    anchored: bool = False
 
 
 @dataclass
@@ -48,10 +49,11 @@ class OverlayLeaderboardEntry:
     rank: int = 0
     bot_name: str = ""
     author: str = ""
-    mmr: int = 1000
+    mmr: int = 600
     mu: float = 0.0
     sigma: float = 0.0
     matches_played: int = 0
+    anchored: bool = False
 
 
 @dataclass

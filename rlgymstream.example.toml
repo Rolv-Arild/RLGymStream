@@ -34,3 +34,30 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 # path = "/path/to/community-bots"
 # exclude = ["broken_bot", "deprecated"]
 
+# ── Anchored Ratings ─────────────────────────────────────────────────
+# Fix a bot's mu and sigma so they never change. The bot still
+# participates in matches and opponents are rated against it normally.
+# Useful as a calibration reference point. Bypasses minimum sigma.
+#
+# Omit "modes" to anchor in all modes, or list specific ones.
+# Use multiple entries for the same bot to set different ratings per mode.
+
+# Example: anchor in all modes
+# [[anchored_ratings]]
+# bot_name = "Nexto"
+# mu = 30.5
+# sigma = 3.0
+
+# Example: different ratings per mode
+# [[anchored_ratings]]
+# bot_name = "Nexto"
+# mu = 30.5
+# sigma = 3.0
+# modes = ["1v1"]
+#
+# [[anchored_ratings]]
+# bot_name = "Nexto"
+# mu = 32.0
+# sigma = 2.5
+# modes = ["2v2", "3v3"]
+

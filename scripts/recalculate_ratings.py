@@ -16,9 +16,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+from rlgymstream.config import AppConfig
 from rlgymstream.db.database import Database
 from rlgymstream.db.models import Rating
-from rlgymstream.matchmaking.ratings import update_ratings
+from rlgymstream.matchmaking.ratings import update_ratings, configure_defaults
 
 
 def _get_all_ratings(db: Database) -> dict[tuple[int, str], Rating]:
@@ -30,8 +31,15 @@ def _get_all_ratings(db: Database) -> dict[tuple[int, str], Rating]:
     return result
 
 
-def _replay(db: Database) -> int:
-    """Reset ratings and replay all matches. Returns match count."""
+def _replay(db: Database, config: AppConfig) -> int:
+    """Reset ratings and replay all matches with anchored bots frozen.
+
+    1. Delete all ratings.
+    2. Seed anchored bots at their configured mu/sigma.
+    3. All other bots start at default (mu=25, sigma=8.33).
+    4. Replay every match — anchored bots participate but their
+       mu/sigma are never updated.
+    """
     with db._conn() as conn:
         rows = conn.execute("SELECT * FROM matches ORDER BY id ASC").fetchall()
 
@@ -39,8 +47,24 @@ def _replay(db: Database) -> int:
     if total == 0:
         return 0
 
+    ALL_MODES = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
+
     with db._conn() as conn:
         conn.execute("DELETE FROM ratings")
+
+    # Seed anchored bots
+    anchored_per_mode: dict[str, set[int]] = {m: set() for m in ALL_MODES}
+    for anchor in config.anchored_ratings:
+        bot = db.get_bot_by_name(anchor.bot_name)
+        if bot and bot.id is not None:
+            target_modes = anchor.modes if anchor.modes else ALL_MODES
+            for mode in target_modes:
+                if mode in anchored_per_mode:
+                    anchored_per_mode[mode].add(bot.id)
+                    r = db.get_rating(bot.id, mode)
+                    r.mu = anchor.mu
+                    r.sigma = anchor.sigma
+                    db.save_rating(r)
 
     for i, row in enumerate(rows, 1):
         mode = row[1]
@@ -50,7 +74,8 @@ def _replay(db: Database) -> int:
 
         is_solo = mode.startswith("solo_")
         update_ratings(db, mode, team_blue_ids, team_orange_ids, winner,
-                       is_solo_queue=is_solo)
+                       is_solo_queue=is_solo,
+                       anchored_bot_ids=anchored_per_mode.get(mode, set()))
 
         if i % 50 == 0 or i == total:
             print(f"  Replayed {i}/{total} matches...")
@@ -67,12 +92,15 @@ def main():
         print(f"Database not found: {db_path}")
         sys.exit(1)
 
+    config = AppConfig.from_toml()
+    configure_defaults(config.default_mu, config.default_sigma)
+
     if dry_run:
         print(f"DRY RUN — working on a temporary copy of {db_path}\n")
 
         # Snapshot current ratings
         db_orig = Database(db_path)
-        bots = {b.id: b.name for b in db_orig.get_all_bots()}
+        bots = {b.id: b.name for b in db_orig.get_all_bots(enabled_only=False)}
         old_ratings = _get_all_ratings(db_orig)
 
         # Copy database to temp file and replay there
@@ -83,7 +111,7 @@ def main():
 
         try:
             db_tmp = Database(tmp_path)
-            total = _replay(db_tmp)
+            total = _replay(db_tmp, config)
             if total == 0:
                 print("No matches to replay.")
                 return
@@ -97,15 +125,15 @@ def main():
                 if not mode_keys:
                     continue
                 print(f"\n=== {mode} ===")
-                print(f"{'Bot':<25} {'old MMR':>8} {'new MMR':>8} {'delta':>7}  {'old σ':>7} {'new σ':>7} {'Δσ':>7}")
+                print(f"{'Bot':<25} {'old MMR':>8} {'new MMR':>8} {'delta':>7}  {'old sig':>7} {'new sig':>7} {'d_sig':>7}")
                 print("-" * 80)
                 for key in sorted(mode_keys, key=lambda k: -new_ratings.get(k, Rating()).mu):
                     bot_id, _ = key
                     name = bots.get(bot_id, f"#{bot_id}")
                     old = old_ratings.get(key, Rating())
                     new = new_ratings.get(key, Rating())
-                    old_mmr = round(20 * old.mu + 500)
-                    new_mmr = round(20 * new.mu + 500)
+                    old_mmr = round(20 * old.mu + 100)
+                    new_mmr = round(20 * new.mu + 100)
                     delta = new_mmr - old_mmr
                     d_sigma = new.sigma - old.sigma
                     print(f"{name:<25} {old_mmr:8d} {new_mmr:8d} {delta:+7d}  {old.sigma:7.2f} {new.sigma:7.2f} {d_sigma:+7.2f}")
@@ -116,7 +144,7 @@ def main():
     else:
         print(f"Recalculating ratings in {db_path}...")
         db = Database(db_path)
-        total = _replay(db)
+        total = _replay(db, config)
         if total == 0:
             print("No matches to replay.")
             return

@@ -22,7 +22,7 @@ from rlgymstream.db.models import Match as MatchModel
 from rlgymstream.match.bot_discovery import discover_bots
 from rlgymstream.match.launcher import MatchLauncher
 from rlgymstream.matchmaking.matchmaker import MatchSetup, pick_match, pick_mode
-from rlgymstream.matchmaking.ratings import get_leaderboard, update_ratings, predict_win_probability
+from rlgymstream.matchmaking.ratings import get_leaderboard, update_ratings, predict_win_probability, configure_defaults
 from rlgymstream.overlay.server import create_overlay_app
 from rlgymstream.overlay.state import (
     OverlayBotInfo,
@@ -57,6 +57,7 @@ def main() -> None:
 
 async def run(config: AppConfig) -> None:
     """Async entry: start overlay server + match loop."""
+    configure_defaults(config.default_mu, config.default_sigma)
     db = Database(config.db_path)
     overlay_state = OverlayState()
     overlay_state.total_matches = db.get_match_count()
@@ -71,8 +72,35 @@ async def run(config: AppConfig) -> None:
         )
         sys.exit(1)
 
+    # Apply anchored ratings — seed fixed mu/sigma for configured bots
+    # Maps mode value → set of bot IDs that are anchored in that mode
+    anchored_bot_ids: dict[str, set[int]] = {m.value: set() for m in config.mode_rotation}
+    for anchor in config.anchored_ratings:
+        bot = db.get_bot_by_name(anchor.bot_name)
+        if bot is None:
+            logger.warning("Anchored bot not found: %s", anchor.bot_name)
+            continue
+        assert bot.id is not None
+        # Determine which modes this anchor applies to
+        if anchor.modes:
+            target_modes = [m for m in config.mode_rotation if m.value in anchor.modes]
+        else:
+            target_modes = list(config.mode_rotation)
+        for mode in target_modes:
+            anchored_bot_ids[mode.value].add(bot.id)
+            r = db.get_rating(bot.id, mode.value)
+            r.mu = anchor.mu
+            r.sigma = anchor.sigma
+            db.save_rating(r)
+        mode_names = ", ".join(m.value for m in target_modes)
+        logger.info(
+            "Anchored %s at mu=%.2f, sigma=%.2f (MMR=%d) for [%s]",
+            anchor.bot_name, anchor.mu, anchor.sigma,
+            _rating_to_mmr(anchor.mu), mode_names,
+        )
+
     # Populate initial leaderboards
-    _refresh_leaderboards(db, overlay_state, config.mode_rotation)
+    _refresh_leaderboards(db, overlay_state, config.mode_rotation, anchored_bot_ids)
 
     # Start overlay web server in background
     overlay_app = create_overlay_app(overlay_state)
@@ -110,6 +138,11 @@ async def run(config: AppConfig) -> None:
     logger.info("Resuming from match #%d", match_counter)
     last_map: str | None = None
     try:
+        # Show leaderboard at startup before the first match
+        _refresh_leaderboards(db, overlay_state, config.mode_rotation, anchored_bot_ids)
+        overlay_state.update_match(OverlayMatchState(phase="idle"))
+        await _sleep_or_stop(config.leaderboard_delay, stop_event)
+
         while not stop_event.is_set():
 
             # Pick mode
@@ -141,7 +174,8 @@ async def run(config: AppConfig) -> None:
             logger.info("Map: %s", setup.display_map_name)
 
             # ── Pre-game phase ───────────────────────────────────────
-            match_state = _build_match_state(setup, match_counter, "pregame", db)
+            match_state = _build_match_state(setup, match_counter, "pregame", db,
+                                             anchored_bot_ids=anchored_bot_ids.get(mode.value, set()))
 
             # Compute win probabilities
             blue_ids = [b.id for b in setup.team_blue]
@@ -201,7 +235,8 @@ async def run(config: AppConfig) -> None:
 
             # Update OpenSkill ratings
             update_ratings(db, mode.value, blue_ids, orange_ids, result.winner,
-                          is_solo_queue=mode.is_solo_queue)
+                          is_solo_queue=mode.is_solo_queue,
+                          anchored_bot_ids=anchored_bot_ids.get(mode.value, set()))
 
             # Compute MMR deltas (post - pre)
             mmr_deltas: dict[int, int] = {}
@@ -234,7 +269,7 @@ async def run(config: AppConfig) -> None:
             })
 
             # Refresh leaderboards and show the idle/leaderboard screen.
-            _refresh_leaderboards(db, overlay_state, config.mode_rotation)
+            _refresh_leaderboards(db, overlay_state, config.mode_rotation, anchored_bot_ids)
             overlay_state.update_match(OverlayMatchState(phase="idle"))
 
             # Show leaderboard for a bit before the next match
@@ -257,7 +292,10 @@ def _build_match_state(
     match_number: int,
     phase: str,
     db: Database,
+    anchored_bot_ids: set[int] | None = None,
 ) -> OverlayMatchState:
+    _anchored = anchored_bot_ids or set()
+
     def bot_info(bot, mode_val):
         assert bot.id is not None
         r = db.get_rating(bot.id, mode_val)
@@ -276,6 +314,7 @@ def _build_match_state(
             wins=wins,
             losses=losses,
             logo_path=bot.logo_path,
+            anchored=bot.id in _anchored,
         )
 
     return OverlayMatchState(
@@ -293,9 +332,12 @@ def _refresh_leaderboards(
     db: Database,
     overlay_state: OverlayState,
     modes: list[MatchMode],
+    anchored_bot_ids: dict[str, set[int]] | None = None,
 ) -> None:
+    _anchored = anchored_bot_ids or {}
     boards: dict[str, list[OverlayLeaderboardEntry]] = {}
     for mode in modes:
+        mode_anchored = _anchored.get(mode.value, set())
         lb = get_leaderboard(db, mode.value)
         boards[mode.value] = [
             OverlayLeaderboardEntry(
@@ -306,6 +348,7 @@ def _refresh_leaderboards(
                 mu=entry["mu"],
                 sigma=entry["sigma"],
                 matches_played=entry["rating"].matches_played,
+                anchored=entry["bot"].id in mode_anchored,
             )
             for i, entry in enumerate(lb)
         ]
@@ -346,10 +389,10 @@ async def _sleep_or_stop(seconds: float, stop_event: asyncio.Event) -> None:
 def _rating_to_mmr(mu: float) -> int:
     """Convert OpenSkill mu to Rocket League–style MMR.
 
-    Formula: MMR = 20 × mu + 500.  This is purely cosmetic and does
-    NOT reflect the bots' actual in-game rank.
+    Formula: MMR = 20 × mu + 100.  This is the exact formula
+    Rocket League uses.  Does NOT reflect actual in-game rank.
     """
-    return round(20 * mu + 500)
+    return round(20 * mu + 100)
 
 
 if __name__ == "__main__":

@@ -126,8 +126,10 @@ class Database:
             ).fetchone()
             if row:
                 return _row_to_rating(row)
-            # Return default
-            return Rating(bot_id=bot_id, mode=mode)
+            # Return default — import here to avoid circular imports
+            from rlgymstream.matchmaking.ratings import get_default_mu, get_default_sigma
+            return Rating(bot_id=bot_id, mode=mode,
+                          mu=get_default_mu(mode), sigma=get_default_sigma(mode))
 
     def get_ratings_for_mode(self, mode: str) -> list[Rating]:
         with self._conn() as conn:

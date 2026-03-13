@@ -20,6 +20,7 @@
         .badge-count { font-size: 14px; color: #b8a8c8; font-weight: 400; }
         .badge-delta-pos { font-size: 16px; color: #4ade80; font-weight: 600; margin-left: 6px; }
         .badge-delta-neg { font-size: 16px; color: #f87171; font-weight: 600; margin-left: 6px; }
+        .anchored-icon { font-size: 0.65em; color: #94a3b8; margin-left: 4px; vertical-align: middle; cursor: default; }
     </style>
 </head>
 <body>
@@ -238,7 +239,7 @@ function renderPregame(m, state, el) {
             </div>
             ${h2hHtml}
             ${winProbHtml}
-            <div class="pre-disclaimer">Bot MMR — does not reflect actual in-game rank</div>
+            <div class="pre-disclaimer">Bot MMR — does not reflect actual in-game rank · Pinned ratings are based on estimates of human MMR</div>
         </div>`;
 }
 
@@ -261,7 +262,7 @@ function botShowcase(bot, team, isSolo) {
                     <div class="pre-bot-author">by ${escapeHtml(bot.author || "Unknown")} ${lang}</div>
                 </div>
                 <div class="pre-bot-mmr-box">
-                    <div class="pre-bot-mmr">${formatMMR(bot.mmr)}</div>
+                    <div class="pre-bot-mmr">${anchorIcon(bot)}${formatMMR(bot.mmr)}</div>
                     <div class="pre-bot-mmr-sub">MMR · ${record}</div>
                 </div>
             </div>
@@ -359,7 +360,7 @@ function renderIdleLeaderboard(state, el) {
                     <div class="idle-lb-name">${escapeHtml(e.bot_name)}</div>
                     <div class="idle-lb-games">${e.matches_played} game${e.matches_played !== 1 ? "s" : ""}</div>
                 </div>
-                <div class="idle-lb-mmr">${formatMMR(e.mmr)}</div>
+                <div class="idle-lb-mmr">${anchorIcon(e)}${formatMMR(e.mmr)}</div>
             </div>`;
         }).join("");
 
@@ -381,13 +382,16 @@ function renderIdleLeaderboard(state, el) {
                 ${columns}
             </div>
             <div class="idle-lb-footer">
-                ${totalMatches} match${totalMatches !== 1 ? "es" : ""} played · Bot MMR — does not reflect actual in-game rank
+                ${totalMatches} match${totalMatches !== 1 ? "es" : ""} played · Bot MMR — does not reflect actual in-game rank · 📌 ratings are based on human estimates
             </div>
         </div>`;
 }
 
 
 /* ── Utilities ─────────────────────────────────────────────── */
+function anchorIcon(obj) {
+    return obj && obj.anchored ? '<span class="anchored-icon" title="Anchored — rating does not change">📌&ensp;</span>' : "";
+}
 function trunc(s, max) {
     if (!s) return "";
     s = s.replace(/\s+/g, " ").trim();

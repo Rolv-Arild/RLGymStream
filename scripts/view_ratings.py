@@ -13,7 +13,7 @@ def main():
         sys.exit(1)
 
     db = Database(db_path)
-    bots = {b.id: b.name for b in db.get_all_bots()}
+    bots = {b.id: b.name for b in db.get_all_bots(enabled_only=False)}
 
     for mode in ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]:
         ratings = db.get_ratings_for_mode(mode)
@@ -25,7 +25,7 @@ def main():
         for r in sorted(ratings, key=lambda x: x.mu, reverse=True):
             name = bots.get(r.bot_id, f"#{r.bot_id}")
             display = r.mu - 3 * r.sigma
-            mmr = round(20 * r.mu + 500)
+            mmr = round(20 * r.mu + 100)
             print(f"{name:<25} {r.mu:8.2f} {r.sigma:8.2f} {display:8.2f} {mmr:6d} {r.matches_played:5d}")
 
 
