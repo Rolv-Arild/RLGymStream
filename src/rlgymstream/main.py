@@ -127,9 +127,6 @@ async def run(config: AppConfig) -> None:
         async def _run_chatbot() -> None:
             try:
                 async with chatbot:
-                    # Add the bot's user token so it can read/send chat messages
-                    if config.twitch_token:
-                        await chatbot.add_token(config.twitch_token, "")
                     await chatbot.start()
             except Exception:
                 logger.exception("Twitch chatbot error")

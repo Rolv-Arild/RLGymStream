@@ -91,11 +91,10 @@ class AppConfig:
     default_mu: dict[str, float] = field(default_factory=lambda: {})   # mode → starting mu (fallback: 25.0)
     default_sigma: dict[str, float] = field(default_factory=lambda: {})  # mode → starting sigma (fallback: 25/3)
     twitch_channel: str = ""      # Twitch channel name to join (empty = chatbot disabled)
-    twitch_token: str = ""        # User OAuth token (access_token) for the bot account
-    twitch_bot_name: str = ""     # Bot username (defaults to channel name if empty)
     twitch_client_id: str = ""    # Twitch application client ID
     twitch_client_secret: str = ""  # Twitch application client secret
     twitch_bot_id: str = ""       # Twitch user ID of the bot account
+    twitch_owner_id: str = ""     # Twitch user ID of the channel owner
 
     def get_default_mu(self, mode: str) -> float:
         """Return the starting mu for a mode, falling back to 25.0."""
@@ -199,11 +198,10 @@ class AppConfig:
             twitch = data.get("twitch", {})
             if twitch:
                 cfg.twitch_channel = twitch.get("channel", "")
-                cfg.twitch_token = twitch.get("token", "")
-                cfg.twitch_bot_name = twitch.get("bot_name", "")
                 cfg.twitch_client_id = twitch.get("client_id", "")
                 cfg.twitch_client_secret = twitch.get("client_secret", "")
                 cfg.twitch_bot_id = twitch.get("bot_id", "")
+                cfg.twitch_owner_id = twitch.get("owner_id", "")
         else:
             # Fallback: use a local bots/ directory
             cfg.mode_rotation = list(MatchMode)
@@ -214,8 +212,6 @@ class AppConfig:
             cfg.db_path = Path(p)
         if p := os.environ.get("RLGYMSTREAM_OVERLAY_PORT"):
             cfg.overlay_port = int(p)
-        if p := os.environ.get("RLGYMSTREAM_TWITCH_TOKEN"):
-            cfg.twitch_token = p
         if p := os.environ.get("RLGYMSTREAM_TWITCH_CHANNEL"):
             cfg.twitch_channel = p
         if p := os.environ.get("RLGYMSTREAM_TWITCH_CLIENT_ID"):
@@ -224,6 +220,8 @@ class AppConfig:
             cfg.twitch_client_secret = p
         if p := os.environ.get("RLGYMSTREAM_TWITCH_BOT_ID"):
             cfg.twitch_bot_id = p
+        if p := os.environ.get("RLGYMSTREAM_TWITCH_OWNER_ID"):
+            cfg.twitch_owner_id = p
 
         return cfg
 

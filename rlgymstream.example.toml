@@ -66,16 +66,18 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 # like !mmr, !lb, !match, !h2h, !bot, !stats, !winrate.
 # Leave channel empty to disable the chatbot.
 #
-# Requires a Twitch application registered at https://dev.twitch.tv/console
-# You need client_id, client_secret, and the bot account's user ID (bot_id).
-# Generate a user token at https://twitchtokengenerator.com with
-# user:read:chat + user:write:chat scopes.
-# Prefer setting credentials via environment variables.
+# 1. Register an app at https://dev.twitch.tv/console
+#    Set OAuth callback to: http://localhost:4343/oauth/callback
+# 2. Fill in client_id, client_secret, bot_id, and owner_id below.
+# 3. Start the app, then authorize ONCE in your browser:
+#    - Bot account:   http://localhost:4343/oauth?scopes=user:read:chat+user:write:chat+user:bot&force_verify=true
+#    - Channel owner: http://localhost:4343/oauth?scopes=channel:bot&force_verify=true
+# Tokens are saved to .tio.tokens.json and refreshed automatically.
 
 # [twitch]
 # channel = "rlgym"
 # client_id = ""             # from Twitch Developer Console
 # client_secret = ""         # from Twitch Developer Console
 # bot_id = ""                # numeric user ID of the bot account
-# token = ""                 # user access token for the bot account
+# owner_id = ""              # numeric user ID of the channel owner (you)
 

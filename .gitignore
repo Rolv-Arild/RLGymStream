@@ -25,6 +25,9 @@ build/
 # User config (contains local filesystem paths to bot repos)
 rlgymstream.toml
 
+# Twitch OAuth tokens (managed by twitchio)
+.tio.tokens.json
+
 # Saved replays
 *.replay
 

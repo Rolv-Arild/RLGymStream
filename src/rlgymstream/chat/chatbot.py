@@ -24,12 +24,13 @@ Commands:
 from __future__ import annotations
 
 import difflib
+import json
 import logging
 import time
 from typing import TYPE_CHECKING
 
 import twitchio  # noqa: F401 — needed at runtime for eventsub
-from twitchio import eventsub
+from twitchio import authentication, eventsub
 from twitchio.ext import commands
 
 if TYPE_CHECKING:
@@ -488,35 +489,65 @@ class RLGymStreamBot(commands.Bot):
         self._overlay = overlay_state
         self._config = config
         self._start_time = time.monotonic()
-        self._broadcaster_id: str | None = None
 
         super().__init__(
             client_id=config.twitch_client_id,
             client_secret=config.twitch_client_secret,
             bot_id=config.twitch_bot_id,
+            owner_id=config.twitch_owner_id or None,
             prefix="!",
         )
 
     async def setup_hook(self) -> None:
-        """Called after login — subscribe to chat events and load commands."""
-        # Resolve the broadcaster's user ID from their login name
-        broadcaster = await self.fetch_user(login=self._config.twitch_channel)
-        if broadcaster is None:
-            logger.error("Could not find Twitch user: %s", self._config.twitch_channel)
+        """Called after login — load commands and subscribe to chat for stored tokens."""
+        await self.add_component(ChatCommands(self))
+
+        # Read stored tokens and subscribe to chat for each authorized user
+        try:
+            with open(".tio.tokens.json", "rb") as fp:
+                tokens = json.load(fp)
+
+            for user_id in tokens:
+                if user_id == self._config.twitch_bot_id:
+                    continue
+
+                sub = eventsub.ChatMessageSubscription(
+                    broadcaster_user_id=user_id,
+                    user_id=self.bot_id,
+                )
+                await self.subscribe_websocket(sub)
+                logger.info("Subscribed to chat for user ID %s", user_id)
+        except FileNotFoundError:
+            logger.info(
+                "No .tio.tokens.json found — authorize on first run. See instructions below."
+            )
+
+        logger.info("Twitch chatbot setup complete")
+        logger.info(
+            "  Bot account:  http://localhost:4343/oauth?scopes=user:read:chat+user:write:chat+user:bot&force_verify=true"
+        )
+        logger.info(
+            "  Channel owner: http://localhost:4343/oauth?scopes=channel:bot&force_verify=true"
+        )
+
+    async def event_ready(self) -> None:
+        logger.info("Twitch chatbot logged in as: %s", self.user)
+
+    async def event_oauth_authorized(self, payload: authentication.UserTokenPayload) -> None:
+        """Called when a user authorizes via the built-in OAuth adapter."""
+        await self.add_token(payload.access_token, payload.refresh_token)
+        logger.info("OAuth token added for user %s", payload.user_id)
+
+        if payload.user_id == self._config.twitch_bot_id:
             return
 
-        self._broadcaster_id = str(broadcaster.id)
-
-        # Subscribe to chat messages via EventSub websocket
+        # Subscribe to chat for the newly authorized channel
         sub = eventsub.ChatMessageSubscription(
-            broadcaster_user_id=self._broadcaster_id,
+            broadcaster_user_id=payload.user_id,
             user_id=self.bot_id,
         )
-        await self.subscribe_websocket(payload=sub)
-
-        # Load the commands component
-        await self.add_component(ChatCommands(self))
-        logger.info("Twitch chatbot ready in channel #%s", self._config.twitch_channel)
+        await self.subscribe_websocket(sub)
+        logger.info("Subscribed to chat for newly authorized user %s", payload.user_id)
 
     async def event_command_error(self, payload: commands.CommandErrorPayload) -> None:
         if isinstance(payload.exception, commands.CommandNotFound):

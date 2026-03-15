@@ -110,11 +110,11 @@ Bots only appear on leaderboards for modes they support.
 |---|---|
 | `RLGYMSTREAM_DB_PATH` | Override SQLite database path |
 | `RLGYMSTREAM_OVERLAY_PORT` | Override overlay server port |
-| `RLGYMSTREAM_TWITCH_TOKEN` | Twitch user access token for the bot account |
 | `RLGYMSTREAM_TWITCH_CHANNEL` | Twitch channel to join |
 | `RLGYMSTREAM_TWITCH_CLIENT_ID` | Twitch application client ID |
 | `RLGYMSTREAM_TWITCH_CLIENT_SECRET` | Twitch application client secret |
 | `RLGYMSTREAM_TWITCH_BOT_ID` | Twitch user ID of the bot account |
+| `RLGYMSTREAM_TWITCH_OWNER_ID` | Twitch user ID of the channel owner |
 
 ### Twitch Chatbot
 
@@ -126,14 +126,17 @@ channel = "rlgym"
 client_id = ""       # from Twitch Developer Console
 client_secret = ""   # from Twitch Developer Console
 bot_id = ""          # numeric user ID of the bot account
-token = ""           # user access token — prefer env var RLGYMSTREAM_TWITCH_TOKEN
+owner_id = ""        # numeric user ID of the channel owner (you)
 ```
 
 **Setup steps:**
-1. Register an application at https://dev.twitch.tv/console — note the **Client ID** and **Client Secret**.
-2. Get your bot account's numeric **User ID** (e.g. via https://www.streamweasels.com/tools/convert-twitch-username-to-user-id/).
-3. Generate a **user access token** at https://twitchtokengenerator.com with `user:read:chat` + `user:write:chat` scopes.
-4. Set credentials via the config file or environment variables.
+1. Register an application at https://dev.twitch.tv/console — note the **Client ID** and **Client Secret**. Set the OAuth redirect URL to `http://localhost:4343/oauth/callback`.
+2. Get the numeric **User IDs** for the bot account and your account (e.g. via https://www.streamweasels.com/tools/convert-twitch-username-to-user-id/).
+3. Add the values to your config file or set them as environment variables.
+4. Start the app, then authorize **once** in your browser:
+   - **Bot account** (in incognito/different browser): `http://localhost:4343/oauth?scopes=user:read:chat+user:write:chat+user:bot&force_verify=true`
+   - **Channel owner** (your main browser): `http://localhost:4343/oauth?scopes=channel:bot&force_verify=true`
+5. Tokens are saved to `.tio.tokens.json` and refreshed automatically — you only need to authorize once.
 
 The chatbot is disabled when any of `channel`, `client_id`, `client_secret`, or `bot_id` are missing.
 
