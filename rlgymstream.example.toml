@@ -66,12 +66,16 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 # like !mmr, !lb, !match, !h2h, !bot, !stats, !winrate.
 # Leave channel empty to disable the chatbot.
 #
-# Generate a token at https://twitchtokengenerator.com
-# with chat:read + chat:edit scopes.
-# Prefer setting the token via RLGYMSTREAM_TWITCH_TOKEN env var.
+# Requires a Twitch application registered at https://dev.twitch.tv/console
+# You need client_id, client_secret, and the bot account's user ID (bot_id).
+# Generate a user token at https://twitchtokengenerator.com with
+# user:read:chat + user:write:chat scopes.
+# Prefer setting credentials via environment variables.
 
 # [twitch]
 # channel = "rlgym"
-# bot_name = "rlgym"        # optional, defaults to channel name
-# token = ""                # OAuth token — use env var instead!
+# client_id = ""             # from Twitch Developer Console
+# client_secret = ""         # from Twitch Developer Console
+# bot_id = ""                # numeric user ID of the bot account
+# token = ""                 # user access token for the bot account
 

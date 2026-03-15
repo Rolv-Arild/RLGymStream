@@ -110,8 +110,11 @@ Bots only appear on leaderboards for modes they support.
 |---|---|
 | `RLGYMSTREAM_DB_PATH` | Override SQLite database path |
 | `RLGYMSTREAM_OVERLAY_PORT` | Override overlay server port |
-| `RLGYMSTREAM_TWITCH_TOKEN` | Twitch OAuth token (preferred over config file) |
+| `RLGYMSTREAM_TWITCH_TOKEN` | Twitch user access token for the bot account |
 | `RLGYMSTREAM_TWITCH_CHANNEL` | Twitch channel to join |
+| `RLGYMSTREAM_TWITCH_CLIENT_ID` | Twitch application client ID |
+| `RLGYMSTREAM_TWITCH_CLIENT_SECRET` | Twitch application client secret |
+| `RLGYMSTREAM_TWITCH_BOT_ID` | Twitch user ID of the bot account |
 
 ### Twitch Chatbot
 
@@ -120,12 +123,19 @@ Add a `[twitch]` section to enable the chatbot:
 ```toml
 [twitch]
 channel = "rlgym"
-bot_name = "rlgym"   # optional, defaults to channel name
-token = ""           # OAuth token — prefer env var RLGYMSTREAM_TWITCH_TOKEN
+client_id = ""       # from Twitch Developer Console
+client_secret = ""   # from Twitch Developer Console
+bot_id = ""          # numeric user ID of the bot account
+token = ""           # user access token — prefer env var RLGYMSTREAM_TWITCH_TOKEN
 ```
 
-Generate a token at https://twitchtokengenerator.com with `chat:read` + `chat:edit` scopes.
-The chatbot is disabled when `channel` is empty or missing.
+**Setup steps:**
+1. Register an application at https://dev.twitch.tv/console — note the **Client ID** and **Client Secret**.
+2. Get your bot account's numeric **User ID** (e.g. via https://www.streamweasels.com/tools/convert-twitch-username-to-user-id/).
+3. Generate a **user access token** at https://twitchtokengenerator.com with `user:read:chat` + `user:write:chat` scopes.
+4. Set credentials via the config file or environment variables.
+
+The chatbot is disabled when any of `channel`, `client_id`, `client_secret`, or `bot_id` are missing.
 
 **Available commands** (all have a 5-second per-user cooldown):
 

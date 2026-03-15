@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 import uvicorn
 
+from rlgymstream.chat.chatbot import TwitchChatBot
 from rlgymstream.config import AppConfig, MatchMode
 from rlgymstream.db.database import Database
 from rlgymstream.db.models import Match as MatchModel
@@ -117,6 +118,28 @@ async def run(config: AppConfig) -> None:
         config.overlay_host,
         config.overlay_port,
     )
+
+    # Start Twitch chatbot if configured
+    chatbot: TwitchChatBot | None = None
+    if config.twitch_channel and config.twitch_client_id and config.twitch_client_secret and config.twitch_bot_id:
+        chatbot = TwitchChatBot(config, db, overlay_state)
+
+        async def _run_chatbot() -> None:
+            try:
+                async with chatbot:
+                    # Add the bot's user token so it can read/send chat messages
+                    if config.twitch_token:
+                        await chatbot.add_token(config.twitch_token, "")
+                    await chatbot.start()
+            except Exception:
+                logger.exception("Twitch chatbot error")
+
+        asyncio.create_task(_run_chatbot())
+        logger.info("Twitch chatbot starting for channel #%s", config.twitch_channel)
+    else:
+        logger.info(
+            "Twitch chatbot disabled (need twitch channel, client_id, client_secret, and bot_id)"
+        )
 
     # Graceful shutdown
     stop_event = asyncio.Event()

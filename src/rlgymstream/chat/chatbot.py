@@ -1,5 +1,7 @@
 """Twitch chatbot — responds to viewer commands with bot stats and match info.
 
+Uses twitchio v3 with EventSub websockets for chat.
+
 Commands:
     !help              — list available commands
     !mmr <bot>         — show a bot's MMR across all modes
@@ -26,6 +28,8 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+import twitchio  # noqa: F401 — needed at runtime for eventsub
+from twitchio import eventsub
 from twitchio.ext import commands
 
 if TYPE_CHECKING:
@@ -60,54 +64,29 @@ def _mmr(mu: float) -> int:
     return round(20 * mu + 100)
 
 
-class TwitchChatBot(commands.Bot):
-    """Twitch IRC chatbot for RLGymStream."""
+# ── Component holding all chat commands ──────────────────────────────
 
-    def __init__(self, config: AppConfig, db: Database, overlay_state: OverlayState):
-        self._db = db
-        self._overlay = overlay_state
-        self._config = config
-        self._start_time = time.monotonic()
 
-        bot_name = config.twitch_bot_name or config.twitch_channel
-        token = config.twitch_token
-        if token and not token.startswith("oauth:"):
-            token = f"oauth:{token}"
-        super().__init__(
-            token=token,
-            prefix="!",
-            initial_channels=[config.twitch_channel],
-            nick=bot_name,
-        )
+class ChatCommands(commands.Component):
+    """Component that holds all viewer-facing chat commands."""
 
-    async def event_ready(self):
-        logger.info("Twitch chatbot connected as %s", self.nick)
+    def __init__(self, bot: RLGymStreamBot) -> None:
+        self.bot: RLGymStreamBot = bot
 
-    async def event_command_error(self, context: commands.Context, error: Exception):
-        if isinstance(error, commands.CommandNotFound):
-            return  # Silently ignore unknown commands
-        logger.error("Chat command error: %s", error)
-
-    # ── Helpers ──────────────────────────────────────────────────
+    # ── Helpers ──────────────────────────────────────────────
 
     def _find_bot(self, name: str):
-        """Case-insensitive bot lookup with fuzzy fallback.
-
-        Returns (bot, None) on exact match, (bot, None) on unique fuzzy
-        match, or (None, suggestion_message) on failure.
-        """
-        bot = self._db.get_bot_by_name(name)
+        """Case-insensitive bot lookup with fuzzy fallback."""
+        bot = self.bot._db.get_bot_by_name(name)
         if bot:
             return bot, None
 
-        # Case-insensitive search
-        all_bots = self._db.get_all_bots(enabled_only=False)
+        all_bots = self.bot._db.get_all_bots(enabled_only=False)
         name_lower = name.lower()
         for b in all_bots:
             if b.name.lower() == name_lower:
                 return b, None
 
-        # Fuzzy match
         bot_names = [b.name for b in all_bots]
         matches = difflib.get_close_matches(name, bot_names, n=3, cutoff=0.5)
         if matches:
@@ -116,24 +95,23 @@ class TwitchChatBot(commands.Bot):
         return None, f'Bot "{name}" not found.'
 
     def _resolve_mode(self, arg: str | None) -> str | None:
-        """Resolve a mode argument to a canonical mode string, or None."""
         if not arg:
             return None
         return MODE_ALIASES.get(arg.lower().strip())
 
-    # ── Commands ─────────────────────────────────────────────────
+    # ── Commands ─────────────────────────────────────────────
 
     @commands.command(name="help")
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_help(self, ctx: commands.Context):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_help(self, ctx: commands.Context) -> None:
         await ctx.send(
             "📋 !mmr · !rank · !lb · !top · !match · !h2h · !bot "
             "· !stats · !winrate · !streak · !last · !predict · !map · !modes · !uptime"
         )
 
     @commands.command(name="mmr")
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_mmr(self, ctx: commands.Context, *, name: str = ""):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_mmr(self, ctx: commands.Context, *, name: str = "") -> None:
         if not name:
             await ctx.send("Usage: !mmr <bot name>")
             return
@@ -145,7 +123,7 @@ class TwitchChatBot(commands.Bot):
 
         parts = []
         for mode in ALL_MODES:
-            r = self._db.get_rating(bot.id, mode)
+            r = self.bot._db.get_rating(bot.id, mode)
             if r.matches_played > 0:
                 parts.append(f"{MODE_DISPLAY[mode]}: {_mmr(r.mu)}")
         if parts:
@@ -154,15 +132,15 @@ class TwitchChatBot(commands.Bot):
             await ctx.send(f"{bot.name} has no rated games yet.")
 
     @commands.command(name="lb", aliases=["leaderboard"])
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_lb(self, ctx: commands.Context, mode_arg: str = "1v1"):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_lb(self, ctx: commands.Context, mode_arg: str = "1v1") -> None:
         mode = self._resolve_mode(mode_arg)
         if mode is None:
             await ctx.send(f'Unknown mode "{mode_arg}". Try: 1v1, 2v2, 3v3, solo2v2, solo3v3')
             return
 
-        with self._overlay._lock:
-            entries = self._overlay.leaderboards.get(mode, [])
+        with self.bot._overlay._lock:
+            entries = self.bot._overlay.leaderboards.get(mode, [])
 
         if not entries:
             await ctx.send(f"No leaderboard data for {MODE_DISPLAY.get(mode, mode)} yet.")
@@ -173,10 +151,10 @@ class TwitchChatBot(commands.Bot):
         await ctx.send(f"🏆 {MODE_DISPLAY.get(mode, mode)} Top 5: {' · '.join(lines)}")
 
     @commands.command(name="match")
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_match(self, ctx: commands.Context):
-        with self._overlay._lock:
-            m = self._overlay.match
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_match(self, ctx: commands.Context) -> None:
+        with self.bot._overlay._lock:
+            m = self.bot._overlay.match
 
         if m.phase == "idle" or not m.team_blue:
             await ctx.send("No match in progress right now.")
@@ -195,14 +173,12 @@ class TwitchChatBot(commands.Bot):
             await ctx.send(f"🎮 [{mode_label}] {blue} vs {orange} ({m.phase}) on {m.map_name}")
 
     @commands.command(name="h2h", aliases=["headtohead"])
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_h2h(self, ctx: commands.Context, *, args: str = ""):
-        # Try to split on " vs ", then fall back to last space
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_h2h(self, ctx: commands.Context, *, args: str = "") -> None:
         if " vs " in args.lower():
             parts = args.split(" vs " if " vs " in args else " VS ")
             name_a, name_b = parts[0].strip(), parts[1].strip()
         elif " " in args.strip():
-            # Split on the last space as fallback
             tokens = args.strip().rsplit(" ", 1)
             if len(tokens) == 2:
                 name_a, name_b = tokens[0].strip(), tokens[1].strip()
@@ -223,7 +199,7 @@ class TwitchChatBot(commands.Bot):
             return
         assert bot_a.id is not None and bot_b.id is not None
 
-        h2h = self._db.get_head_to_head(bot_a.id, bot_b.id)
+        h2h = self.bot._db.get_head_to_head(bot_a.id, bot_b.id)
         if h2h["total"] == 0:
             await ctx.send(f"{bot_a.name} and {bot_b.name} have never played each other.")
             return
@@ -235,8 +211,8 @@ class TwitchChatBot(commands.Bot):
         )
 
     @commands.command(name="bot")
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_bot(self, ctx: commands.Context, *, name: str = ""):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_bot(self, ctx: commands.Context, *, name: str = "") -> None:
         if not name:
             await ctx.send("Usage: !bot <bot name>")
             return
@@ -249,10 +225,9 @@ class TwitchChatBot(commands.Bot):
         author = bot.author or "Unknown"
         desc = bot.description[:120] + "…" if len(bot.description) > 120 else bot.description
 
-        # Overall record across all modes
         total_w, total_l = 0, 0
         for mode in ALL_MODES:
-            w, l, _d = self._db.get_bot_record(bot.id, mode)
+            w, l, _d = self.bot._db.get_bot_record(bot.id, mode)
             total_w += w
             total_l += l
 
@@ -266,18 +241,18 @@ class TwitchChatBot(commands.Bot):
         await ctx.send(" | ".join(parts))
 
     @commands.command(name="stats")
-    @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
-    async def cmd_stats(self, ctx: commands.Context):
-        total_matches = self._db.get_match_count()
-        all_bots = self._db.get_all_bots(enabled_only=True)
+    @commands.cooldown(rate=1, per=10, key=commands.BucketType.channel)
+    async def cmd_stats(self, ctx: commands.Context) -> None:
+        total_matches = self.bot._db.get_match_count()
+        all_bots = self.bot._db.get_all_bots(enabled_only=True)
         await ctx.send(
             f"📈 {total_matches} matches played with {len(all_bots)} active bots "
-            f"across {len(self._config.mode_rotation)} modes"
+            f"across {len(self.bot._config.mode_rotation)} modes"
         )
 
     @commands.command(name="winrate", aliases=["wr"])
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_winrate(self, ctx: commands.Context, *, name: str = ""):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_winrate(self, ctx: commands.Context, *, name: str = "") -> None:
         if not name:
             await ctx.send("Usage: !winrate <bot name>")
             return
@@ -289,7 +264,7 @@ class TwitchChatBot(commands.Bot):
 
         parts = []
         for mode in ALL_MODES:
-            w, l, d = self._db.get_bot_record(bot.id, mode)
+            w, l, d = self.bot._db.get_bot_record(bot.id, mode)
             total = w + l + d
             if total == 0:
                 continue
@@ -302,14 +277,13 @@ class TwitchChatBot(commands.Bot):
             await ctx.send(f"{bot.name} has no games played yet.")
 
     @commands.command(name="rank")
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_rank(self, ctx: commands.Context, *, args: str = ""):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_rank(self, ctx: commands.Context, *, args: str = "") -> None:
         """!rank <bot> [mode] — show a bot's rank position."""
         if not args:
             await ctx.send("Usage: !rank <bot name> [mode]")
             return
 
-        # Try to split off a trailing mode argument
         tokens = args.rsplit(" ", 1)
         mode = None
         if len(tokens) == 2:
@@ -327,8 +301,8 @@ class TwitchChatBot(commands.Bot):
         modes_to_check = [mode] if mode else ALL_MODES
         parts = []
         for m in modes_to_check:
-            with self._overlay._lock:
-                entries = self._overlay.leaderboards.get(m, [])
+            with self.bot._overlay._lock:
+                entries = self.bot._overlay.leaderboards.get(m, [])
             for i, e in enumerate(entries):
                 if e.bot_name == bot.name:
                     parts.append(f"{MODE_DISPLAY[m]}: #{i + 1}/{len(entries)} ({e.mmr} MMR)")
@@ -340,8 +314,8 @@ class TwitchChatBot(commands.Bot):
             await ctx.send(f"{bot.name} is not ranked in any mode yet.")
 
     @commands.command(name="top")
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_top(self, ctx: commands.Context, mode_arg: str = ""):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_top(self, ctx: commands.Context, mode_arg: str = "") -> None:
         """!top [mode] — show the #1 bot per mode, or for a specific mode."""
         if mode_arg:
             mode = self._resolve_mode(mode_arg)
@@ -353,9 +327,9 @@ class TwitchChatBot(commands.Bot):
             modes_to_show = ALL_MODES
 
         parts = []
-        with self._overlay._lock:
+        with self.bot._overlay._lock:
             for m in modes_to_show:
-                entries = self._overlay.leaderboards.get(m, [])
+                entries = self.bot._overlay.leaderboards.get(m, [])
                 if entries:
                     e = entries[0]
                     parts.append(f"{MODE_DISPLAY[m]}: {e.bot_name} ({e.mmr})")
@@ -366,8 +340,8 @@ class TwitchChatBot(commands.Bot):
             await ctx.send("No leaderboard data yet.")
 
     @commands.command(name="streak")
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_streak(self, ctx: commands.Context, *, name: str = ""):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_streak(self, ctx: commands.Context, *, name: str = "") -> None:
         """!streak <bot> — current win/loss streak."""
         if not name:
             await ctx.send("Usage: !streak <bot name>")
@@ -378,10 +352,9 @@ class TwitchChatBot(commands.Bot):
             return
         assert bot.id is not None
 
-        # Get recent matches (across all modes) and compute streak
-        matches = self._db.get_recent_matches(limit=50)
+        matches = self.bot._db.get_recent_matches(limit=50)
         bid = str(bot.id)
-        streak_type = ""  # "W" or "L"
+        streak_type = ""
         streak_count = 0
 
         for m in matches:
@@ -392,7 +365,7 @@ class TwitchChatBot(commands.Bot):
             if not (in_blue or in_orange):
                 continue
             if m.winner == "draw":
-                break  # draws break the streak
+                break
 
             won = (m.winner == "blue" and in_blue) or (m.winner == "orange" and in_orange)
             result = "W" if won else "L"
@@ -411,20 +384,20 @@ class TwitchChatBot(commands.Bot):
             await ctx.send(f"{emoji} {bot.name}: {streak_count} game {'win' if streak_type == 'W' else 'loss'} streak")
 
     @commands.command(name="last")
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_last(self, ctx: commands.Context, count: str = "1"):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_last(self, ctx: commands.Context, count: str = "1") -> None:
         """!last [N] — show the last 1-3 match results."""
         try:
             n = max(1, min(3, int(count)))
         except ValueError:
             n = 1
 
-        matches = self._db.get_recent_matches(limit=n)
+        matches = self.bot._db.get_recent_matches(limit=n)
         if not matches:
             await ctx.send("No matches played yet.")
             return
 
-        bots = {b.id: b.name for b in self._db.get_all_bots(enabled_only=False)}
+        bots = {b.id: b.name for b in self.bot._db.get_all_bots(enabled_only=False)}
         lines = []
         for m in matches:
             blue_names = ", ".join(dict.fromkeys(
@@ -440,11 +413,11 @@ class TwitchChatBot(commands.Bot):
         await ctx.send(" | ".join(lines))
 
     @commands.command(name="predict")
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_predict(self, ctx: commands.Context):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_predict(self, ctx: commands.Context) -> None:
         """!predict — win probability for current match."""
-        with self._overlay._lock:
-            m = self._overlay.match
+        with self.bot._overlay._lock:
+            m = self.bot._overlay.match
 
         if m.phase == "idle" or not m.team_blue:
             await ctx.send("No match in progress right now.")
@@ -463,11 +436,11 @@ class TwitchChatBot(commands.Bot):
         await ctx.send(f"🔮 {blue} {p_blue}% — {p_orange}% {orange}")
 
     @commands.command(name="map")
-    @commands.cooldown(rate=1, per=5, bucket=commands.Bucket.member)
-    async def cmd_map(self, ctx: commands.Context):
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_map(self, ctx: commands.Context) -> None:
         """!map — current map name."""
-        with self._overlay._lock:
-            m = self._overlay.match
+        with self.bot._overlay._lock:
+            m = self.bot._overlay.match
 
         if m.phase == "idle" or not m.map_name:
             await ctx.send("No match in progress right now.")
@@ -476,23 +449,23 @@ class TwitchChatBot(commands.Bot):
         await ctx.send(f"🗺️ {m.map_name}")
 
     @commands.command(name="modes")
-    @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
-    async def cmd_modes(self, ctx: commands.Context):
+    @commands.cooldown(rate=1, per=10, key=commands.BucketType.channel)
+    async def cmd_modes(self, ctx: commands.Context) -> None:
         """!modes — active mode rotation."""
-        mode_names = [m.display_name for m in self._config.mode_rotation]
+        mode_names = [m.display_name for m in self.bot._config.mode_rotation]
         await ctx.send(f"🔄 Mode rotation: {', '.join(mode_names)}")
 
     @commands.command(name="uptime")
-    @commands.cooldown(rate=1, per=10, bucket=commands.Bucket.channel)
-    async def cmd_uptime(self, ctx: commands.Context):
+    @commands.cooldown(rate=1, per=10, key=commands.BucketType.channel)
+    async def cmd_uptime(self, ctx: commands.Context) -> None:
         """!uptime — how long the bot has been running."""
-        elapsed = time.monotonic() - self._start_time
+        elapsed = time.monotonic() - self.bot._start_time
         hours, remainder = divmod(int(elapsed), 3600)
         minutes, seconds = divmod(remainder, 60)
 
-        total_matches = self._db.get_match_count()
-        with self._overlay._lock:
-            session_matches = self._overlay.total_matches
+        total_matches = self.bot._db.get_match_count()
+        with self.bot._overlay._lock:
+            session_matches = self.bot._overlay.total_matches
 
         if hours > 0:
             time_str = f"{hours}h {minutes}m"
@@ -502,4 +475,55 @@ class TwitchChatBot(commands.Bot):
             time_str = f"{seconds}s"
 
         await ctx.send(f"⏱️ Running for {time_str} — {session_matches} matches this session, {total_matches} all time")
+
+
+# ── Bot class ────────────────────────────────────────────────────────
+
+
+class RLGymStreamBot(commands.Bot):
+    """Twitch chatbot for RLGymStream using twitchio v3."""
+
+    def __init__(self, config: AppConfig, db: Database, overlay_state: OverlayState):
+        self._db = db
+        self._overlay = overlay_state
+        self._config = config
+        self._start_time = time.monotonic()
+        self._broadcaster_id: str | None = None
+
+        super().__init__(
+            client_id=config.twitch_client_id,
+            client_secret=config.twitch_client_secret,
+            bot_id=config.twitch_bot_id,
+            prefix="!",
+        )
+
+    async def setup_hook(self) -> None:
+        """Called after login — subscribe to chat events and load commands."""
+        # Resolve the broadcaster's user ID from their login name
+        broadcaster = await self.fetch_user(login=self._config.twitch_channel)
+        if broadcaster is None:
+            logger.error("Could not find Twitch user: %s", self._config.twitch_channel)
+            return
+
+        self._broadcaster_id = str(broadcaster.id)
+
+        # Subscribe to chat messages via EventSub websocket
+        sub = eventsub.ChatMessageSubscription(
+            broadcaster_user_id=self._broadcaster_id,
+            user_id=self.bot_id,
+        )
+        await self.subscribe_websocket(payload=sub)
+
+        # Load the commands component
+        await self.add_component(ChatCommands(self))
+        logger.info("Twitch chatbot ready in channel #%s", self._config.twitch_channel)
+
+    async def event_command_error(self, payload: commands.CommandErrorPayload) -> None:
+        if isinstance(payload.exception, commands.CommandNotFound):
+            return
+        logger.error("Chat command error: %s", payload.exception)
+
+
+# Keep backward-compatible alias
+TwitchChatBot = RLGymStreamBot
 
