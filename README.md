@@ -110,6 +110,37 @@ Bots only appear on leaderboards for modes they support.
 |---|---|
 | `RLGYMSTREAM_DB_PATH` | Override SQLite database path |
 | `RLGYMSTREAM_OVERLAY_PORT` | Override overlay server port |
+| `RLGYMSTREAM_TWITCH_TOKEN` | Twitch OAuth token (preferred over config file) |
+| `RLGYMSTREAM_TWITCH_CHANNEL` | Twitch channel to join |
+
+### Twitch Chatbot
+
+Add a `[twitch]` section to enable the chatbot:
+
+```toml
+[twitch]
+channel = "rlgym"
+bot_name = "rlgym"   # optional, defaults to channel name
+token = ""           # OAuth token — prefer env var RLGYMSTREAM_TWITCH_TOKEN
+```
+
+Generate a token at https://twitchtokengenerator.com with `chat:read` + `chat:edit` scopes.
+The chatbot is disabled when `channel` is empty or missing.
+
+**Available commands** (all have a 5-second per-user cooldown):
+
+| Command | Description |
+|---|---|
+| `!help` | List available commands |
+| `!mmr <bot>` | Show a bot's MMR across all modes |
+| `!lb [mode]` | Top 5 leaderboard (default: 1v1). Modes: `1v1`, `2s`, `3v3`, `solo2v2`, etc. |
+| `!match` | Current match info (teams, score, phase) |
+| `!h2h <botA> vs <botB>` | Head-to-head win/loss record |
+| `!bot <name>` | Bot info — author, description, overall record |
+| `!stats` | Total matches played, number of active bots |
+| `!winrate <bot>` | Win rate per mode |
+
+Bot names are matched case-insensitively with fuzzy "did you mean?" suggestions.
 
 ## Running
 
@@ -177,6 +208,8 @@ src/rlgymstream/
 ├── matchmaking/
 │   ├── matchmaker.py             # Accept/reject matchmaking, sigma priority, map rotation
 │   └── ratings.py                # OpenSkill PlackettLuce wrapper, cross-team duplicate handling
+├── chat/
+│   └── chatbot.py                # TwitchIO chatbot with viewer commands
 └── overlay/
     ├── server.py                 # FastAPI app with SSE + JSON API
     ├── state.py                  # Thread-safe shared state

@@ -90,6 +90,9 @@ class AppConfig:
     mercy_goal_diff: int = 8            # end match early if goal diff reaches this
     default_mu: dict[str, float] = field(default_factory=lambda: {})   # mode → starting mu (fallback: 25.0)
     default_sigma: dict[str, float] = field(default_factory=lambda: {})  # mode → starting sigma (fallback: 25/3)
+    twitch_channel: str = ""      # Twitch channel name to join (empty = chatbot disabled)
+    twitch_token: str = ""        # OAuth token with chat:read + chat:edit scopes
+    twitch_bot_name: str = ""     # Bot username (defaults to channel name if empty)
 
     def get_default_mu(self, mode: str) -> float:
         """Return the starting mu for a mode, falling back to 25.0."""
@@ -188,6 +191,13 @@ class AppConfig:
                     sigma=float(anchor.get("sigma", 8.333333333333334)),
                     modes=anchor.get("modes", []),
                 ))
+
+            # [twitch] section
+            twitch = data.get("twitch", {})
+            if twitch:
+                cfg.twitch_channel = twitch.get("channel", "")
+                cfg.twitch_token = twitch.get("token", "")
+                cfg.twitch_bot_name = twitch.get("bot_name", "")
         else:
             # Fallback: use a local bots/ directory
             cfg.mode_rotation = list(MatchMode)
@@ -198,6 +208,10 @@ class AppConfig:
             cfg.db_path = Path(p)
         if p := os.environ.get("RLGYMSTREAM_OVERLAY_PORT"):
             cfg.overlay_port = int(p)
+        if p := os.environ.get("RLGYMSTREAM_TWITCH_TOKEN"):
+            cfg.twitch_token = p
+        if p := os.environ.get("RLGYMSTREAM_TWITCH_CHANNEL"):
+            cfg.twitch_channel = p
 
         return cfg
 

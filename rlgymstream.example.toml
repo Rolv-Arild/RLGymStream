@@ -61,3 +61,17 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 # sigma = 2.5
 # modes = ["2v2", "3v3"]
 
+# ── Twitch Chatbot ───────────────────────────────────────────────────
+# Connect a chatbot to Twitch chat that responds to viewer commands
+# like !mmr, !lb, !match, !h2h, !bot, !stats, !winrate.
+# Leave channel empty to disable the chatbot.
+#
+# Generate a token at https://twitchtokengenerator.com
+# with chat:read + chat:edit scopes.
+# Prefer setting the token via RLGYMSTREAM_TWITCH_TOKEN env var.
+
+# [twitch]
+# channel = "rlgym"
+# bot_name = "rlgym"        # optional, defaults to channel name
+# token = ""                # OAuth token — use env var instead!
+

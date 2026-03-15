@@ -280,6 +280,8 @@ async def run(config: AppConfig) -> None:
         logger.exception("Fatal error in match loop")
     finally:
         launcher.shutdown()
+        if chatbot is not None:
+            await chatbot.close()
         server.should_exit = True
         await server_task
 
