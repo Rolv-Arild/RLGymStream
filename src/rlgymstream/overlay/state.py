@@ -67,6 +67,7 @@ class OverlayState:
     recent_results: list[dict[str, Any]] = field(default_factory=list)
     head_to_head: dict[str, Any] = field(default_factory=dict)
     total_matches: int = 0
+    session_matches: int = 0
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _version: int = 0
 
@@ -97,6 +98,7 @@ class OverlayState:
             self.recent_results.insert(0, result)
             self.recent_results = self.recent_results[:20]
             self.total_matches += 1
+            self.session_matches += 1
             self._version += 1
 
     def to_json(self) -> str:

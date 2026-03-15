@@ -7,7 +7,7 @@ Commands:
     !mmr <bot>                 — show a bot's MMR across all modes
     !pos <bot> [mode]          — show a bot's rank position (alias: !position)
     !lb [mode]                 — show top 5 leaderboard (default: 1v1)
-    !top [mode]                — show the #1 bot per mode (or one mode)
+    !best [mode]                   — show the #1 bot per mode (or one mode)
     !match                     — show current/last match info
     !h2h <botA> vs <botB> [mode] — head-to-head record
     !bot <name> [mode]         — bot info (author, description, win/loss)
@@ -117,7 +117,7 @@ class ChatCommands(commands.Component):
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_help(self, ctx: commands.Context) -> None:
         await ctx.send(
-            "📋 !mmr · !pos · !lb · !top · !match · !h2h · !bot "
+            "📋 !mmr · !pos · !lb · !best · !match · !h2h · !bot "
             "· !stats · !winrate · !streak · !last · !predict · !map · !modes · !uptime"
         )
 
@@ -337,10 +337,10 @@ class ChatCommands(commands.Component):
         else:
             await ctx.send(f"{bot.name} is not ranked in any mode yet.")
 
-    @commands.command(name="top")
+    @commands.command(name="best")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_top(self, ctx: commands.Context, mode_arg: str = "") -> None:
-        """!top [mode] — show the #1 bot per mode, or for a specific mode."""
+        """!best [mode] — show the #1 bot per mode, or for a specific mode."""
         if mode_arg:
             mode = self._resolve_mode(mode_arg)
             if mode is None:
@@ -587,7 +587,7 @@ class ChatCommands(commands.Component):
 
         total_matches = self.bot._db.get_match_count()
         with self.bot._overlay._lock:
-            session_matches = self.bot._overlay.total_matches
+            session_matches = self.bot._overlay.session_matches
 
         if hours > 0:
             time_str = f"{hours}h {minutes}m"

@@ -149,7 +149,10 @@ async def run(config: AppConfig) -> None:
             async def _run_chatbot() -> None:
                 try:
                     async with chatbot:
-                        await chatbot.start()
+                        # Only run the OAuth web adapter if tokens haven't been saved yet
+                        import os
+                        need_auth = not os.path.exists(".tio.tokens.json")
+                        await chatbot.start(with_adapter=need_auth)
                 except Exception:
                     logger.exception("Twitch chatbot error")
 

@@ -31,7 +31,7 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 | Command | Description |
 |---|---|
 | `!lb [mode]` | Top 5 leaderboard (default: 1v1). Alias: `!leaderboard` |
-| `!top [mode]` | Show the #1 bot per mode, or for a specific mode |
+| `!best [mode]` | Show the #1 bot per mode, or for a specific mode |
 
 ## Match Info
 
