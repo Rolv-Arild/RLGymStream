@@ -228,7 +228,7 @@ class ChatCommands(commands.Component):
 
         await ctx.send(
             f"⚔️ {bot_a.name} vs {bot_b.name}{mode_label}: "
-            f"{h2h['wins_a']}W-{h2h['draws']}D-{h2h['wins_b']}L "
+            f"{h2h['wins_a']}W-{h2h['wins_b']}L "
             f"({h2h['total']} games)"
         )
 
