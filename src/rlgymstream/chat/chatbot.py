@@ -70,8 +70,11 @@ class TwitchChatBot(commands.Bot):
         self._start_time = time.monotonic()
 
         bot_name = config.twitch_bot_name or config.twitch_channel
+        token = config.twitch_token
+        if token and not token.startswith("oauth:"):
+            token = f"oauth:{token}"
         super().__init__(
-            token=config.twitch_token,
+            token=token,
             prefix="!",
             initial_channels=[config.twitch_channel],
             nick=bot_name,
