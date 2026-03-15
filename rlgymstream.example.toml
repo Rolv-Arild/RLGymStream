@@ -68,16 +68,18 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 #
 # 1. Register an app at https://dev.twitch.tv/console
 #    Set OAuth callback to: http://localhost:4343/oauth/callback
-# 2. Fill in client_id, client_secret, bot_id, and owner_id below.
+# 2. Fill in client_id, client_secret, and channel below.
+#    bot_id and owner_id are optional — if omitted, they default to the channel's user ID.
 # 3. Start the app, then authorize ONCE in your browser:
-#    - Bot account:   http://localhost:4343/oauth?scopes=user:read:chat+user:write:chat+user:bot&force_verify=true
-#    - Channel owner: http://localhost:4343/oauth?scopes=channel:bot&force_verify=true
+#    - Log in as the bot account:  http://localhost:4343/oauth?scopes=user:read:chat+user:write:chat+user:bot&force_verify=true
+#    - Log in as channel owner:    http://localhost:4343/oauth?scopes=channel:bot&force_verify=true
+#    (If the bot IS the channel, just do both URLs while logged in as that account.)
 # Tokens are saved to .tio.tokens.json and refreshed automatically.
 
 # [twitch]
 # channel = "rlgym"
 # client_id = ""             # from Twitch Developer Console
 # client_secret = ""         # from Twitch Developer Console
-# bot_id = ""                # numeric user ID of the bot account
-# owner_id = ""              # numeric user ID of the channel owner (you)
+# bot_id = ""                # optional: numeric user ID of bot account (defaults to channel)
+# owner_id = ""              # optional: numeric user ID of channel owner (defaults to channel)
 

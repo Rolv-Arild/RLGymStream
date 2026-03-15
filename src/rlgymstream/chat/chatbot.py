@@ -3,28 +3,30 @@
 Uses twitchio v3 with EventSub websockets for chat.
 
 Commands:
-    !help              — list available commands
-    !mmr <bot>         — show a bot's MMR across all modes
-    !rank <bot> [mode] — show a bot's rank position
-    !lb [mode]         — show top 5 leaderboard (default: 1v1)
-    !top [mode]        — show the #1 bot per mode (or one mode)
-    !match             — show current/last match info
-    !h2h <botA> <botB> — head-to-head record
-    !bot <name>        — bot info (author, description, win/loss)
-    !stats             — total matches, number of bots, etc.
-    !winrate <bot>     — win rate per mode
-    !streak <bot>      — current win/loss streak
-    !last [N]          — last 1-3 match results
-    !predict           — win probability for current match
-    !map               — current map name
-    !modes             — active mode rotation
-    !uptime            — how long the bot has been running
+    !help                      — list available commands
+    !mmr <bot>                 — show a bot's MMR across all modes
+    !pos <bot> [mode]          — show a bot's rank position (alias: !position)
+    !lb [mode]                 — show top 5 leaderboard (default: 1v1)
+    !top [mode]                — show the #1 bot per mode (or one mode)
+    !match                     — show current/last match info
+    !h2h <botA> vs <botB> [mode] — head-to-head record
+    !bot <name> [mode]         — bot info (author, description, win/loss)
+    !stats                     — total matches, number of bots, etc.
+    !winrate <bot> [mode]      — win rate per mode or for a specific mode
+    !streak <bot> [mode]       — current win/loss streak
+    !last [N] [mode]           — last 1-3 match results
+    !predict                       — win probability for current match
+    !predict <team1> vs <team2> [mode] — predict any matchup (comma-separated teams for solo modes)
+    !map                       — current map name
+    !modes                     — active mode rotation
+    !uptime                    — how long the bot has been running
+
+Mode shortcuts: 1v1, 2v2, 3v3, 1s, 2s, 3s, solo2v2, solo3v3, etc.
 """
 
 from __future__ import annotations
 
 import difflib
-import json
 import logging
 import time
 from typing import TYPE_CHECKING
@@ -100,13 +102,22 @@ class ChatCommands(commands.Component):
             return None
         return MODE_ALIASES.get(arg.lower().strip())
 
+    def _split_name_and_mode(self, args: str) -> tuple[str, str | None]:
+        """Try to extract a trailing mode from args. Returns (name, mode_or_None)."""
+        tokens = args.rsplit(" ", 1)
+        if len(tokens) == 2:
+            maybe_mode = self._resolve_mode(tokens[1])
+            if maybe_mode:
+                return tokens[0].strip(), maybe_mode
+        return args.strip(), None
+
     # ── Commands ─────────────────────────────────────────────
 
     @commands.command(name="help")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_help(self, ctx: commands.Context) -> None:
         await ctx.send(
-            "📋 !mmr · !rank · !lb · !top · !match · !h2h · !bot "
+            "📋 !mmr · !pos · !lb · !top · !match · !h2h · !bot "
             "· !stats · !winrate · !streak · !last · !predict · !map · !modes · !uptime"
         )
 
@@ -176,18 +187,27 @@ class ChatCommands(commands.Component):
     @commands.command(name="h2h", aliases=["headtohead"])
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_h2h(self, ctx: commands.Context, *, args: str = "") -> None:
-        if " vs " in args.lower():
-            parts = args.split(" vs " if " vs " in args else " VS ")
+        """!h2h <botA> vs <botB> [mode] — head-to-head record, optionally per mode."""
+        if not args:
+            await ctx.send("Usage: !h2h <botA> vs <botB> [mode]")
+            return
+
+        # Check if last word is a mode
+        rest, mode = self._split_name_and_mode(args)
+
+        if " vs " in rest.lower():
+            sep = " vs " if " vs " in rest else " VS "
+            parts = rest.split(sep, 1)
             name_a, name_b = parts[0].strip(), parts[1].strip()
-        elif " " in args.strip():
-            tokens = args.strip().rsplit(" ", 1)
+        elif " " in rest.strip():
+            tokens = rest.strip().rsplit(" ", 1)
             if len(tokens) == 2:
                 name_a, name_b = tokens[0].strip(), tokens[1].strip()
             else:
-                await ctx.send("Usage: !h2h <botA> vs <botB>")
+                await ctx.send("Usage: !h2h <botA> vs <botB> [mode]")
                 return
         else:
-            await ctx.send("Usage: !h2h <botA> vs <botB>")
+            await ctx.send("Usage: !h2h <botA> vs <botB> [mode]")
             return
 
         bot_a, err_a = self._find_bot(name_a)
@@ -200,23 +220,27 @@ class ChatCommands(commands.Component):
             return
         assert bot_a.id is not None and bot_b.id is not None
 
-        h2h = self.bot._db.get_head_to_head(bot_a.id, bot_b.id)
+        h2h = self.bot._db.get_head_to_head(bot_a.id, bot_b.id, mode=mode)
+        mode_label = f" in {MODE_DISPLAY[mode]}" if mode else ""
         if h2h["total"] == 0:
-            await ctx.send(f"{bot_a.name} and {bot_b.name} have never played each other.")
+            await ctx.send(f"{bot_a.name} and {bot_b.name} have never played each other{mode_label}.")
             return
 
         await ctx.send(
-            f"⚔️ {bot_a.name} vs {bot_b.name}: "
+            f"⚔️ {bot_a.name} vs {bot_b.name}{mode_label}: "
             f"{h2h['wins_a']}W-{h2h['draws']}D-{h2h['wins_b']}L "
             f"({h2h['total']} games)"
         )
 
     @commands.command(name="bot")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
-    async def cmd_bot(self, ctx: commands.Context, *, name: str = "") -> None:
-        if not name:
-            await ctx.send("Usage: !bot <bot name>")
+    async def cmd_bot(self, ctx: commands.Context, *, args: str = "") -> None:
+        """!bot <name> [mode] — bot info, optionally with record for a specific mode."""
+        if not args:
+            await ctx.send("Usage: !bot <bot name> [mode]")
             return
+
+        name, mode = self._split_name_and_mode(args)
         bot, err = self._find_bot(name)
         if not bot:
             await ctx.send(err)
@@ -226,16 +250,18 @@ class ChatCommands(commands.Component):
         author = bot.author or "Unknown"
         desc = bot.description[:120] + "…" if len(bot.description) > 120 else bot.description
 
+        modes_to_check = [mode] if mode else ALL_MODES
         total_w, total_l = 0, 0
-        for mode in ALL_MODES:
-            w, l, _d = self.bot._db.get_bot_record(bot.id, mode)
+        for m in modes_to_check:
+            w, l, _d = self.bot._db.get_bot_record(bot.id, m)
             total_w += w
             total_l += l
 
         parts = [f"🤖 {bot.name} by {author}"]
         if desc:
             parts.append(desc)
-        parts.append(f"Record: {total_w}W-{total_l}L")
+        mode_label = f" ({MODE_DISPLAY[mode]})" if mode else ""
+        parts.append(f"Record{mode_label}: {total_w}W-{total_l}L")
         if bot.language:
             parts.append(f"Lang: {bot.language}")
 
@@ -253,47 +279,44 @@ class ChatCommands(commands.Component):
 
     @commands.command(name="winrate", aliases=["wr"])
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
-    async def cmd_winrate(self, ctx: commands.Context, *, name: str = "") -> None:
-        if not name:
-            await ctx.send("Usage: !winrate <bot name>")
+    async def cmd_winrate(self, ctx: commands.Context, *, args: str = "") -> None:
+        """!winrate <bot> [mode] — win rate per mode or for a specific mode."""
+        if not args:
+            await ctx.send("Usage: !winrate <bot name> [mode]")
             return
+
+        name, mode = self._split_name_and_mode(args)
         bot, err = self._find_bot(name)
         if not bot:
             await ctx.send(err)
             return
         assert bot.id is not None
 
+        modes_to_check = [mode] if mode else ALL_MODES
         parts = []
-        for mode in ALL_MODES:
-            w, l, d = self.bot._db.get_bot_record(bot.id, mode)
+        for m in modes_to_check:
+            w, l, d = self.bot._db.get_bot_record(bot.id, m)
             total = w + l + d
             if total == 0:
                 continue
             pct = round(100 * w / total)
-            parts.append(f"{MODE_DISPLAY[mode]}: {pct}% ({w}-{l})")
+            parts.append(f"{MODE_DISPLAY[m]}: {pct}% ({w}-{l})")
 
         if parts:
             await ctx.send(f"📊 {bot.name} win rates — {' | '.join(parts)}")
         else:
             await ctx.send(f"{bot.name} has no games played yet.")
 
-    @commands.command(name="rank")
+    @commands.command(name="pos", aliases=["position"])
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_rank(self, ctx: commands.Context, *, args: str = "") -> None:
-        """!rank <bot> [mode] — show a bot's rank position."""
+        """!pos <bot> [mode] — show a bot's rank position."""
         if not args:
-            await ctx.send("Usage: !rank <bot name> [mode]")
+            await ctx.send("Usage: !pos <bot name> [mode]")
             return
 
-        tokens = args.rsplit(" ", 1)
-        mode = None
-        if len(tokens) == 2:
-            maybe_mode = self._resolve_mode(tokens[1])
-            if maybe_mode:
-                mode = maybe_mode
-                args = tokens[0]
-
-        bot, err = self._find_bot(args)
+        name, mode = self._split_name_and_mode(args)
+        bot, err = self._find_bot(name)
         if not bot:
             await ctx.send(err)
             return
@@ -342,23 +365,29 @@ class ChatCommands(commands.Component):
 
     @commands.command(name="streak")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
-    async def cmd_streak(self, ctx: commands.Context, *, name: str = "") -> None:
-        """!streak <bot> — current win/loss streak."""
-        if not name:
-            await ctx.send("Usage: !streak <bot name>")
+    async def cmd_streak(self, ctx: commands.Context, *, args: str = "") -> None:
+        """!streak <bot> [mode] — current win/loss streak, optionally per mode."""
+        if not args:
+            await ctx.send("Usage: !streak <bot name> [mode]")
             return
+
+        name, mode = self._split_name_and_mode(args)
         bot, err = self._find_bot(name)
         if not bot:
             await ctx.send(err)
             return
         assert bot.id is not None
 
-        matches = self.bot._db.get_recent_matches(limit=50)
+        matches = self.bot._db.get_recent_matches(limit=100)
         bid = str(bot.id)
         streak_type = ""
         streak_count = 0
 
         for m in matches:
+            # Filter by mode if specified
+            if mode and m.mode != mode:
+                continue
+
             blue_ids = m.team_blue_ids.split(",")
             orange_ids = m.team_orange_ids.split(",")
             in_blue = bid in blue_ids
@@ -378,24 +407,42 @@ class ChatCommands(commands.Component):
             else:
                 break
 
+        mode_label = f" in {MODE_DISPLAY[mode]}" if mode else ""
         if streak_count == 0:
-            await ctx.send(f"{bot.name} has no recent matches.")
+            await ctx.send(f"{bot.name} has no recent matches{mode_label}.")
         else:
             emoji = "🔥" if streak_type == "W" else "❄️"
-            await ctx.send(f"{emoji} {bot.name}: {streak_count} game {'win' if streak_type == 'W' else 'loss'} streak")
+            await ctx.send(f"{emoji} {bot.name}: {streak_count} game {'win' if streak_type == 'W' else 'loss'} streak{mode_label}")
 
     @commands.command(name="last")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
-    async def cmd_last(self, ctx: commands.Context, count: str = "1") -> None:
-        """!last [N] — show the last 1-3 match results."""
-        try:
-            n = max(1, min(3, int(count)))
-        except ValueError:
-            n = 1
+    async def cmd_last(self, ctx: commands.Context, *, args: str = "1") -> None:
+        """!last [N] [mode] — show the last 1-3 match results, optionally filtered by mode."""
+        # Parse optional count and mode from args
+        tokens = args.strip().split()
+        n = 1
+        mode = None
+        for tok in tokens:
+            maybe_mode = self._resolve_mode(tok)
+            if maybe_mode:
+                mode = maybe_mode
+            else:
+                try:
+                    n = max(1, min(3, int(tok)))
+                except ValueError:
+                    pass
 
-        matches = self.bot._db.get_recent_matches(limit=n)
+        # Fetch more than needed if filtering by mode
+        fetch_limit = n * 10 if mode else n
+        matches = self.bot._db.get_recent_matches(limit=fetch_limit)
+        if mode:
+            matches = [m for m in matches if m.mode == mode][:n]
+        else:
+            matches = matches[:n]
+
         if not matches:
-            await ctx.send("No matches played yet.")
+            mode_label = f" for {MODE_DISPLAY[mode]}" if mode else ""
+            await ctx.send(f"No matches played yet{mode_label}.")
             return
 
         bots = {b.id: b.name for b in self.bot._db.get_all_bots(enabled_only=False)}
@@ -415,26 +462,100 @@ class ChatCommands(commands.Component):
 
     @commands.command(name="predict")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
-    async def cmd_predict(self, ctx: commands.Context) -> None:
-        """!predict — win probability for current match."""
-        with self.bot._overlay._lock:
-            m = self.bot._overlay.match
+    async def cmd_predict(self, ctx: commands.Context, *, args: str = "") -> None:
+        """!predict [<team1> vs <team2> [mode]] — win probability.
 
-        if m.phase == "idle" or not m.team_blue:
-            await ctx.send("No match in progress right now.")
+        No args = current match. Teams can be comma-separated for solo modes:
+          !predict Nexto vs Necto
+          !predict Nexto vs Necto 2v2
+          !predict A, B vs C, D
+          !predict A, B, C vs D, E, F 3v3
+        """
+        if not args:
+            # No args: show prediction for current live match
+            with self.bot._overlay._lock:
+                m = self.bot._overlay.match
+
+            if m.phase == "idle" or not m.team_blue:
+                await ctx.send("Usage: !predict <team1> vs <team2> [mode] — or no args during a match")
+                return
+
+            probs = m.win_probabilities
+            if not probs or len(probs) < 2:
+                await ctx.send("Win probabilities not available for this match.")
+                return
+
+            blue = ", ".join(dict.fromkeys(b.name for b in m.team_blue))
+            orange = ", ".join(dict.fromkeys(b.name for b in m.team_orange))
+            p_blue = round(probs[0] * 100)
+            p_orange = round(probs[1] * 100)
+            await ctx.send(f"🔮 {blue} {p_blue}% — {p_orange}% {orange}")
             return
 
-        probs = m.win_probabilities
-        if not probs or len(probs) < 2:
-            await ctx.send("Win probabilities not available for this match.")
+        # Strip optional trailing mode
+        rest, mode = self._split_name_and_mode(args)
+
+        # Split on " vs "
+        if " vs " not in rest.lower():
+            await ctx.send("Usage: !predict <team1> vs <team2> [mode]")
             return
 
-        blue = ", ".join(dict.fromkeys(b.name for b in m.team_blue))
-        orange = ", ".join(dict.fromkeys(b.name for b in m.team_orange))
-        p_blue = round(probs[0] * 100)
-        p_orange = round(probs[1] * 100)
+        sep = " vs " if " vs " in rest else " VS "
+        left_str, right_str = rest.split(sep, 1)
 
-        await ctx.send(f"🔮 {blue} {p_blue}% — {p_orange}% {orange}")
+        # Parse comma-separated bot names per side
+        left_names = [n.strip() for n in left_str.split(",") if n.strip()]
+        right_names = [n.strip() for n in right_str.split(",") if n.strip()]
+
+        if not left_names or not right_names:
+            await ctx.send("Usage: !predict <team1> vs <team2> [mode]")
+            return
+
+        # Resolve all bots
+        left_bots = []
+        for name in left_names:
+            bot, err = self._find_bot(name)
+            if not bot:
+                await ctx.send(err)
+                return
+            left_bots.append(bot)
+
+        right_bots = []
+        for name in right_names:
+            bot, err = self._find_bot(name)
+            if not bot:
+                await ctx.send(err)
+                return
+            right_bots.append(bot)
+
+        # Auto-detect mode from team size if not specified
+        team_size = max(len(left_bots), len(right_bots))
+        is_solo = len(set(b.id for b in left_bots)) > 1 or len(set(b.id for b in right_bots)) > 1
+        if not mode:
+            if team_size == 1:
+                mode = "1v1"
+            elif team_size == 2:
+                mode = "solo_2v2" if is_solo else "2v2"
+            elif team_size >= 3:
+                mode = "solo_3v3" if is_solo else "3v3"
+            else:
+                mode = "1v1"
+
+        from rlgymstream.matchmaking.ratings import predict_win_probability
+        left_ids = [b.id for b in left_bots]
+        right_ids = [b.id for b in right_bots]
+        probs = predict_win_probability(
+            self.bot._db, mode,
+            left_ids, right_ids,
+            is_solo_queue=is_solo,
+        )
+
+        left_label = ", ".join(b.name for b in left_bots)
+        right_label = ", ".join(b.name for b in right_bots)
+        p_left = round(probs[0] * 100)
+        p_right = round(probs[1] * 100)
+        mode_label = MODE_DISPLAY.get(mode, mode)
+        await ctx.send(f"🔮 [{mode_label}] {left_label} {p_left}% — {p_right}% {right_label}")
 
     @commands.command(name="map")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
@@ -494,41 +615,62 @@ class RLGymStreamBot(commands.Bot):
             client_id=config.twitch_client_id,
             client_secret=config.twitch_client_secret,
             bot_id=config.twitch_bot_id,
-            owner_id=config.twitch_owner_id or None,
+            owner_id=config.twitch_owner_id or config.twitch_bot_id,
             prefix="!",
         )
 
     async def setup_hook(self) -> None:
-        """Called after login — load commands and subscribe to chat for stored tokens."""
+        """Called after login — load commands and subscribe to chat.
+
+        Tokens are loaded from .tio.tokens.json by login() before this runs.
+        """
+        import json
+
         await self.add_component(ChatCommands(self))
 
-        # Read stored tokens and subscribe to chat for each authorized user
+        owner_id = self._config.twitch_owner_id or self.bot_id
+
+        # Read stored tokens to find which user IDs we have tokens for
         try:
             with open(".tio.tokens.json", "rb") as fp:
                 tokens = json.load(fp)
-
-            for user_id in tokens:
-                if user_id == self._config.twitch_bot_id:
-                    continue
-
-                sub = eventsub.ChatMessageSubscription(
-                    broadcaster_user_id=user_id,
-                    user_id=self.bot_id,
-                )
-                await self.subscribe_websocket(sub)
-                logger.info("Subscribed to chat for user ID %s", user_id)
         except FileNotFoundError:
+            tokens = {}
             logger.info(
-                "No .tio.tokens.json found — authorize on first run. See instructions below."
+                "No .tio.tokens.json found — authorize the bot at "
+                "http://localhost:4343/oauth?scopes=user:read:chat+user:write:chat+user:bot&force_verify=true"
             )
 
+        # Subscribe to chat for each stored user (except the bot itself)
+        for user_id in tokens:
+            if user_id == self.bot_id:
+                continue
+            sub = eventsub.ChatMessageSubscription(
+                broadcaster_user_id=user_id,
+                user_id=self.bot_id,
+            )
+            try:
+                await self.subscribe_websocket(sub)
+                logger.info("Subscribed to chat for user ID %s", user_id)
+            except Exception as e:
+                logger.warning("Failed to subscribe to chat for user %s: %s", user_id, e)
+
+        # If bot == channel owner, we still need to subscribe to our own channel
+        if owner_id == self.bot_id and owner_id not in tokens:
+            # No token stored yet for this account
+            pass
+        elif owner_id == self.bot_id:
+            sub = eventsub.ChatMessageSubscription(
+                broadcaster_user_id=owner_id,
+                user_id=self.bot_id,
+            )
+            try:
+                await self.subscribe_websocket(sub)
+                logger.info("Subscribed to own channel chat (bot == owner)")
+            except Exception as e:
+                logger.warning("Failed to subscribe to own chat: %s", e)
+
         logger.info("Twitch chatbot setup complete")
-        logger.info(
-            "  Bot account:  http://localhost:4343/oauth?scopes=user:read:chat+user:write:chat+user:bot&force_verify=true"
-        )
-        logger.info(
-            "  Channel owner: http://localhost:4343/oauth?scopes=channel:bot&force_verify=true"
-        )
 
     async def event_ready(self) -> None:
         logger.info("Twitch chatbot logged in as: %s", self.user)
@@ -536,18 +678,21 @@ class RLGymStreamBot(commands.Bot):
     async def event_oauth_authorized(self, payload: authentication.UserTokenPayload) -> None:
         """Called when a user authorizes via the built-in OAuth adapter."""
         await self.add_token(payload.access_token, payload.refresh_token)
-        logger.info("OAuth token added for user %s", payload.user_id)
+        # Save tokens to file immediately so they persist across restarts
+        await self.save_tokens()
+        logger.info("OAuth token saved for user %s", payload.user_id)
 
-        if payload.user_id == self._config.twitch_bot_id:
-            return
-
-        # Subscribe to chat for the newly authorized channel
+        # Subscribe to chat for this user's channel (even if it's the bot account,
+        # since the bot may be the same account as the channel owner)
         sub = eventsub.ChatMessageSubscription(
             broadcaster_user_id=payload.user_id,
             user_id=self.bot_id,
         )
-        await self.subscribe_websocket(sub)
-        logger.info("Subscribed to chat for newly authorized user %s", payload.user_id)
+        try:
+            await self.subscribe_websocket(sub)
+            logger.info("Subscribed to chat for user %s", payload.user_id)
+        except Exception as e:
+            logger.warning("Failed to subscribe to chat for user %s: %s", payload.user_id, e)
 
     async def event_command_error(self, payload: commands.CommandErrorPayload) -> None:
         if isinstance(payload.exception, commands.CommandNotFound):

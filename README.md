@@ -113,8 +113,8 @@ Bots only appear on leaderboards for modes they support.
 | `RLGYMSTREAM_TWITCH_CHANNEL` | Twitch channel to join |
 | `RLGYMSTREAM_TWITCH_CLIENT_ID` | Twitch application client ID |
 | `RLGYMSTREAM_TWITCH_CLIENT_SECRET` | Twitch application client secret |
-| `RLGYMSTREAM_TWITCH_BOT_ID` | Twitch user ID of the bot account |
-| `RLGYMSTREAM_TWITCH_OWNER_ID` | Twitch user ID of the channel owner |
+| `RLGYMSTREAM_TWITCH_BOT_ID` | *(optional)* Twitch user ID of bot account — defaults to channel |
+| `RLGYMSTREAM_TWITCH_OWNER_ID` | *(optional)* Twitch user ID of channel owner — defaults to channel |
 
 ### Twitch Chatbot
 
@@ -125,20 +125,20 @@ Add a `[twitch]` section to enable the chatbot:
 channel = "rlgym"
 client_id = ""       # from Twitch Developer Console
 client_secret = ""   # from Twitch Developer Console
-bot_id = ""          # numeric user ID of the bot account
-owner_id = ""        # numeric user ID of the channel owner (you)
+# bot_id = ""        # optional — defaults to channel's user ID
+# owner_id = ""      # optional — defaults to channel's user ID
 ```
 
 **Setup steps:**
 1. Register an application at https://dev.twitch.tv/console — note the **Client ID** and **Client Secret**. Set the OAuth redirect URL to `http://localhost:4343/oauth/callback`.
-2. Get the numeric **User IDs** for the bot account and your account (e.g. via https://www.streamweasels.com/tools/convert-twitch-username-to-user-id/).
-3. Add the values to your config file or set them as environment variables.
-4. Start the app, then authorize **once** in your browser:
-   - **Bot account** (in incognito/different browser): `http://localhost:4343/oauth?scopes=user:read:chat+user:write:chat+user:bot&force_verify=true`
-   - **Channel owner** (your main browser): `http://localhost:4343/oauth?scopes=channel:bot&force_verify=true`
-5. Tokens are saved to `.tio.tokens.json` and refreshed automatically — you only need to authorize once.
+2. Add `channel`, `client_id`, and `client_secret` to your config (or set as env vars). If the bot account is the same as the channel, you're done with config.
+3. Start the app, then authorize **once** in your browser:
+   - **Bot account**: `http://localhost:4343/oauth?scopes=user:read:chat+user:write:chat+user:bot&force_verify=true`
+   - **Channel owner**: `http://localhost:4343/oauth?scopes=channel:bot&force_verify=true`
+   - If the bot IS the channel account, just do both URLs while logged in as that account.
+4. Tokens are saved to `.tio.tokens.json` and refreshed automatically — you only need to authorize once.
 
-The chatbot is disabled when any of `channel`, `client_id`, `client_secret`, or `bot_id` are missing.
+The chatbot is disabled when `channel`, `client_id`, or `client_secret` are missing.
 
 **Available commands** (all have a 5-second per-user cooldown):
 
@@ -265,4 +265,3 @@ With `sigma_priority_chance` probability, an additional constraint is added:
 the matchup must also include the bot with the highest σ (most uncertain
 rating) in the current mode.  This helps new or under-played bots get
 calibrated faster without biasing which opponent they face.
-

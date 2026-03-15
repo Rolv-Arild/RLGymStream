@@ -121,21 +121,43 @@ async def run(config: AppConfig) -> None:
 
     # Start Twitch chatbot if configured
     chatbot: TwitchChatBot | None = None
-    if config.twitch_channel and config.twitch_client_id and config.twitch_client_secret and config.twitch_bot_id:
-        chatbot = TwitchChatBot(config, db, overlay_state)
+    if config.twitch_channel and config.twitch_client_id and config.twitch_client_secret:
+        # Resolve bot_id/owner_id from channel name if not explicitly set
+        if not config.twitch_bot_id or not config.twitch_owner_id:
+            import twitchio
+            async with twitchio.Client(
+                client_id=config.twitch_client_id,
+                client_secret=config.twitch_client_secret,
+            ) as temp_client:
+                await temp_client.login(load_tokens=False, save_tokens=False)
+                users = await temp_client.fetch_users(logins=[config.twitch_channel])
+                if users:
+                    channel_id = str(users[0].id)
+                    if not config.twitch_bot_id:
+                        config.twitch_bot_id = channel_id
+                        logger.info("Resolved bot_id from channel '%s': %s", config.twitch_channel, channel_id)
+                    if not config.twitch_owner_id:
+                        config.twitch_owner_id = channel_id
+                        logger.info("Resolved owner_id from channel '%s': %s", config.twitch_channel, channel_id)
+                else:
+                    logger.error("Could not find Twitch user '%s' — chatbot disabled", config.twitch_channel)
+                    config.twitch_bot_id = ""
 
-        async def _run_chatbot() -> None:
-            try:
-                async with chatbot:
-                    await chatbot.start()
-            except Exception:
-                logger.exception("Twitch chatbot error")
+        if config.twitch_bot_id:
+            chatbot = TwitchChatBot(config, db, overlay_state)
 
-        asyncio.create_task(_run_chatbot())
-        logger.info("Twitch chatbot starting for channel #%s", config.twitch_channel)
+            async def _run_chatbot() -> None:
+                try:
+                    async with chatbot:
+                        await chatbot.start()
+                except Exception:
+                    logger.exception("Twitch chatbot error")
+
+            asyncio.create_task(_run_chatbot())
+            logger.info("Twitch chatbot starting for channel #%s", config.twitch_channel)
     else:
         logger.info(
-            "Twitch chatbot disabled (need twitch channel, client_id, client_secret, and bot_id)"
+            "Twitch chatbot disabled (need twitch channel, client_id, and client_secret)"
         )
 
     # Graceful shutdown
