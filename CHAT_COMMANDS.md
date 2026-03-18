@@ -38,23 +38,27 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 | Command | Description |
 |---|---|
 | `!match` | Current match info — teams, score, phase, map |
-| `!last [N] [mode]` | Last 1–3 match results, optionally filtered by mode |
+| `!last [N] [mode] [bot]` | Last 1–3 match results, optionally filtered by mode and/or bot name |
 | `!map` | Current map name |
 
 ## Head-to-Head
 
 | Command | Description |
 |---|---|
-| `!h2h <botA> vs <botB> [mode]` | Head-to-head win/loss/draw record between two bots |
+| `!h2h` | Head-to-head record for the current match's bots |
+| `!h2h current [mode]` | Same, explicitly |
+| `!h2h <botA> vs <botB> [mode]` | Head-to-head record between any two bots |
 
 ## Predictions
 
 | Command | Description |
 |---|---|
 | `!predict` | Win probability for the current live match |
+| `!predict current` | Same, explicitly |
 | `!predict <A> vs <B> [mode]` | Predict a 1v1 matchup (defaults to 1v1 mode) |
 | `!predict <A>, <B> vs <C>, <D>` | Predict a solo queue matchup (auto-detects mode from team size) |
 | `!predict <A>, <B>, <C> vs <D>, <E>, <F> [mode]` | Predict with explicit teams and mode |
+| `!predict <MMR> vs <MMR>` | Predict from raw MMR values (e.g. `!predict 1500 vs 1200`) |
 
 ---
 
@@ -70,8 +74,11 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 !last 3 3v3
 !predict Nexto vs Necto
 !predict Nexto, Necto vs Ripple, Ordis
+!predict 1500 vs 1200
 !predict A, B, C vs D, E, F solo3v3
 !bot Nexto 2v2
+!last 3 Nexto
+!last 2 1v1 Necto
 ```
 
 ## Notes
@@ -80,4 +87,5 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 - **Mode** is always optional and appears as the last argument. Without it, commands show data across all modes (or default to 1v1 for predictions).
 - **`!predict`** with no arguments shows the prediction for the current live match. With arguments, it computes a prediction from the bots' current ratings.
 - **Cooldowns**: most commands have a 5-second per-user cooldown. `!stats`, `!modes`, and `!uptime` have a 10-second per-channel cooldown.
+- **Help**: any command supports `help` as an argument to show usage (e.g. `!h2h help`, `!predict help`).
 

@@ -3,25 +3,28 @@
 Uses twitchio v3 with EventSub websockets for chat.
 
 Commands:
-    !help                      — list available commands
-    !mmr <bot>                 — show a bot's MMR across all modes
-    !rating <bot> [mode]       — show raw mu and sigma values
-    !pos <bot> [mode]          — show a bot's rank position (alias: !position)
-    !lb [mode]                 — show top 5 leaderboard (default: 1v1)
+    !help                          — list available commands
+    !mmr <bot>                     — show a bot's MMR across all modes
+    !rating <bot> [mode]           — show raw mu and sigma values
+    !pos <bot> [mode]              — show a bot's rank position (alias: !position)
+    !lb [mode]                     — show top 5 leaderboard (default: 1v1)
     !best [mode]                   — show the #1 bot per mode (or one mode)
-    !match                     — show current/last match info
-    !h2h <botA> vs <botB> [mode] — head-to-head record
-    !bot <name> [mode]         — bot info (author, description, win/loss)
-    !stats                     — total matches, number of bots, etc.
-    !winrate <bot> [mode]      — win rate per mode or for a specific mode
-    !streak <bot> [mode]       — current win/loss streak
-    !last [N] [mode]           — last 1-3 match results
-    !predict                       — win probability for current match
-    !predict <team1> vs <team2> [mode] — predict any matchup (comma-separated teams for solo modes)
-    !map                       — current map name
-    !modes                     — active mode rotation
-    !uptime                    — how long the bot has been running
+    !match                         — show current/last match info
+    !h2h <botA> vs <botB> [mode]   — head-to-head record
+    !h2h current [mode]            — head-to-head for the current match
+    !bot <name> [mode]             — bot info (author, description, win/loss)
+    !stats                         — total matches, number of bots, etc.
+    !winrate <bot> [mode]          — win rate per mode or for a specific mode
+    !streak <bot> [mode]           — current win/loss streak
+    !last [N] [mode] [bot]         — last 1-3 match results, filtered by mode and/or bot
+    !predict <team1> vs <team2> [mode] — predict any matchup (comma-separated teams)
+    !predict <MMR> vs <MMR>        — predict from raw MMR values
+    !predict current               — win probability for current match
+    !map                           — current map name
+    !modes                         — active mode rotation
+    !uptime                        — how long the bot has been running
 
+All commands support "help" as an argument (e.g. !h2h help) to show usage.
 Mode shortcuts: 1v1, 2v2, 3v3, 1s, 2s, 3s, solo2v2, solo3v3, etc.
 """
 
@@ -112,6 +115,11 @@ class ChatCommands(commands.Component):
                 return tokens[0].strip(), maybe_mode
         return args.strip(), None
 
+    @staticmethod
+    def _is_help(args: str) -> bool:
+        """Check if the user is asking for help on a command."""
+        return args.strip().lower() in ("help", "?", "-h", "--help")
+
     # ── Commands ─────────────────────────────────────────────
 
     @commands.command(name="help")
@@ -148,8 +156,8 @@ class ChatCommands(commands.Component):
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_rating(self, ctx: commands.Context, *, args: str = "") -> None:
         """!rating <bot> [mode] — show raw mu and sigma values."""
-        if not args:
-            await ctx.send("Usage: !rating <bot name> [mode]")
+        if not args or self._is_help(args):
+            await ctx.send("Usage: !rating <bot name> [mode] — show raw μ and σ values")
             return
 
         name, mode = self._split_name_and_mode(args)
@@ -214,15 +222,30 @@ class ChatCommands(commands.Component):
     @commands.command(name="h2h", aliases=["headtohead"])
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_h2h(self, ctx: commands.Context, *, args: str = "") -> None:
-        """!h2h <botA> vs <botB> [mode] — head-to-head record, optionally per mode."""
-        if not args:
-            await ctx.send("Usage: !h2h <botA> vs <botB> [mode]")
+        """!h2h <botA> vs <botB> [mode] | !h2h current [mode]"""
+        if not args or self._is_help(args):
+            await ctx.send("Usage: !h2h <botA> vs <botB> [mode] or !h2h current")
             return
 
-        # Check if last word is a mode
+        # Check for "current" keyword → use current match
         rest, mode = self._split_name_and_mode(args)
 
-        if " vs " in rest.lower():
+        if rest.lower() == "current":
+            with self.bot._overlay._lock:
+                m = self.bot._overlay.match
+
+            if m.phase == "idle" or not m.team_blue or not m.team_orange:
+                await ctx.send("No match in progress.")
+                return
+
+            blue_names = list(dict.fromkeys(b.name for b in m.team_blue))
+            orange_names = list(dict.fromkeys(b.name for b in m.team_orange))
+            if len(blue_names) != 1 or len(orange_names) != 1:
+                await ctx.send("H2H for current match only works in standard modes. Use: !h2h <botA> vs <botB>")
+                return
+
+            name_a, name_b = blue_names[0], orange_names[0]
+        elif " vs " in rest.lower():
             sep = " vs " if " vs " in rest else " VS "
             parts = rest.split(sep, 1)
             name_a, name_b = parts[0].strip(), parts[1].strip()
@@ -231,10 +254,10 @@ class ChatCommands(commands.Component):
             if len(tokens) == 2:
                 name_a, name_b = tokens[0].strip(), tokens[1].strip()
             else:
-                await ctx.send("Usage: !h2h <botA> vs <botB> [mode]")
+                await ctx.send("Usage: !h2h <botA> vs <botB> [mode] or !h2h current")
                 return
         else:
-            await ctx.send("Usage: !h2h <botA> vs <botB> [mode]")
+            await ctx.send("Usage: !h2h <botA> vs <botB> [mode] or !h2h current")
             return
 
         bot_a, err_a = self._find_bot(name_a)
@@ -263,8 +286,8 @@ class ChatCommands(commands.Component):
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_bot(self, ctx: commands.Context, *, args: str = "") -> None:
         """!bot <name> [mode] — bot info, optionally with record for a specific mode."""
-        if not args:
-            await ctx.send("Usage: !bot <bot name> [mode]")
+        if not args or self._is_help(args):
+            await ctx.send("Usage: !bot <bot name> [mode] — show bot info and record")
             return
 
         name, mode = self._split_name_and_mode(args)
@@ -308,8 +331,8 @@ class ChatCommands(commands.Component):
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_winrate(self, ctx: commands.Context, *, args: str = "") -> None:
         """!winrate <bot> [mode] — win rate per mode or for a specific mode."""
-        if not args:
-            await ctx.send("Usage: !winrate <bot name> [mode]")
+        if not args or self._is_help(args):
+            await ctx.send("Usage: !winrate <bot name> [mode] — show win rate")
             return
 
         name, mode = self._split_name_and_mode(args)
@@ -338,8 +361,8 @@ class ChatCommands(commands.Component):
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_rank(self, ctx: commands.Context, *, args: str = "") -> None:
         """!pos <bot> [mode] — show a bot's rank position."""
-        if not args:
-            await ctx.send("Usage: !pos <bot name> [mode]")
+        if not args or self._is_help(args):
+            await ctx.send("Usage: !pos <bot name> [mode] — show leaderboard position")
             return
 
         name, mode = self._split_name_and_mode(args)
@@ -394,8 +417,8 @@ class ChatCommands(commands.Component):
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_streak(self, ctx: commands.Context, *, args: str = "") -> None:
         """!streak <bot> [mode] — current win/loss streak, optionally per mode."""
-        if not args:
-            await ctx.send("Usage: !streak <bot name> [mode]")
+        if not args or self._is_help(args):
+            await ctx.send("Usage: !streak <bot name> [mode] — show win/loss streak")
             return
 
         name, mode = self._split_name_and_mode(args)
@@ -444,11 +467,15 @@ class ChatCommands(commands.Component):
     @commands.command(name="last")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_last(self, ctx: commands.Context, *, args: str = "1") -> None:
-        """!last [N] [mode] — show the last 1-3 match results, optionally filtered by mode."""
-        # Parse optional count and mode from args
+        """!last [N] [mode] [bot] — show the last 1-3 match results, optionally filtered by mode and/or bot."""
+        if self._is_help(args):
+            await ctx.send("Usage: !last [N] [mode] [bot] — show last 1-3 matches")
+            return
+        # Parse optional count, mode, and bot name from args
         tokens = args.strip().split()
         n = 1
         mode = None
+        bot_name_parts = []
         for tok in tokens:
             maybe_mode = self._resolve_mode(tok)
             if maybe_mode:
@@ -457,19 +484,37 @@ class ChatCommands(commands.Component):
                 try:
                     n = max(1, min(3, int(tok)))
                 except ValueError:
-                    pass
+                    bot_name_parts.append(tok)
 
-        # Fetch more than needed if filtering by mode
-        fetch_limit = n * 10 if mode else n
+        # Resolve bot filter if provided
+        filter_bot = None
+        if bot_name_parts:
+            bot_name = " ".join(bot_name_parts)
+            filter_bot, err = self._find_bot(bot_name)
+            if not filter_bot:
+                await ctx.send(err)
+                return
+
+        # Fetch more than needed if filtering
+        fetch_limit = n * 20 if (mode or filter_bot) else n
         matches = self.bot._db.get_recent_matches(limit=fetch_limit)
+
         if mode:
-            matches = [m for m in matches if m.mode == mode][:n]
-        else:
-            matches = matches[:n]
+            matches = [m for m in matches if m.mode == mode]
+        if filter_bot:
+            bid = str(filter_bot.id)
+            matches = [m for m in matches
+                       if bid in m.team_blue_ids.split(",") or bid in m.team_orange_ids.split(",")]
+        matches = matches[:n]
 
         if not matches:
-            mode_label = f" for {MODE_DISPLAY[mode]}" if mode else ""
-            await ctx.send(f"No matches played yet{mode_label}.")
+            parts = []
+            if mode:
+                parts.append(MODE_DISPLAY[mode])
+            if filter_bot:
+                parts.append(filter_bot.name)
+            label = f" for {', '.join(parts)}" if parts else ""
+            await ctx.send(f"No matches found{label}.")
             return
 
         bots = {b.id: b.name for b in self.bot._db.get_all_bots(enabled_only=False)}
@@ -492,19 +537,23 @@ class ChatCommands(commands.Component):
     async def cmd_predict(self, ctx: commands.Context, *, args: str = "") -> None:
         """!predict [<team1> vs <team2> [mode]] — win probability.
 
-        No args = current match. Teams can be comma-separated for solo modes:
+        No args = current match. Teams can be comma-separated for solo modes.
+        You can also use raw MMR values:
           !predict Nexto vs Necto
-          !predict Nexto vs Necto 2v2
           !predict A, B vs C, D
-          !predict A, B, C vs D, E, F 3v3
+          !predict 1500 vs 1200
         """
-        if not args:
-            # No args: show prediction for current live match
+        if not args or self._is_help(args):
+            await ctx.send("Usage: !predict <team1> vs <team2> [mode] or !predict current")
+            return
+
+        # "current" keyword: show prediction for current live match
+        if args.strip().lower() == "current":
             with self.bot._overlay._lock:
                 m = self.bot._overlay.match
 
             if m.phase == "idle" or not m.team_blue:
-                await ctx.send("Usage: !predict <team1> vs <team2> [mode] — or no args during a match")
+                await ctx.send("No match in progress.")
                 return
 
             probs = m.win_probabilities
@@ -530,17 +579,40 @@ class ChatCommands(commands.Component):
         sep = " vs " if " vs " in rest else " VS "
         left_str, right_str = rest.split(sep, 1)
 
-        # Parse comma-separated bot names per side
-        left_names = [n.strip() for n in left_str.split(",") if n.strip()]
-        right_names = [n.strip() for n in right_str.split(",") if n.strip()]
+        # Parse comma-separated entries per side
+        left_entries = [n.strip() for n in left_str.split(",") if n.strip()]
+        right_entries = [n.strip() for n in right_str.split(",") if n.strip()]
 
-        if not left_names or not right_names:
+        if not left_entries or not right_entries:
             await ctx.send("Usage: !predict <team1> vs <team2> [mode]")
             return
 
-        # Resolve all bots
+        # Check if all entries are numeric (raw MMR mode)
+        def _is_number(s: str) -> bool:
+            try:
+                float(s)
+                return True
+            except ValueError:
+                return False
+
+        if all(_is_number(e) for e in left_entries + right_entries):
+            # Raw MMR prediction — convert MMR to mu, use min sigma
+            from rlgymstream.matchmaking.ratings import make_rating, _model, MIN_SIGMA
+
+            left_ratings = [make_rating((float(e) - 100) / 20, MIN_SIGMA) for e in left_entries]
+            right_ratings = [make_rating((float(e) - 100) / 20, MIN_SIGMA) for e in right_entries]
+            probs = _model.predict_win(teams=[left_ratings, right_ratings])
+
+            left_label = ", ".join(left_entries)
+            right_label = ", ".join(right_entries)
+            p_left = round(probs[0] * 100)
+            p_right = round(probs[1] * 100)
+            await ctx.send(f"🔮 MMR {left_label} {p_left}% — {p_right}% {right_label}")
+            return
+
+        # Bot name mode — resolve all bots
         left_bots = []
-        for name in left_names:
+        for name in left_entries:
             bot, err = self._find_bot(name)
             if not bot:
                 await ctx.send(err)
@@ -548,7 +620,7 @@ class ChatCommands(commands.Component):
             left_bots.append(bot)
 
         right_bots = []
-        for name in right_names:
+        for name in right_entries:
             bot, err = self._find_bot(name)
             if not bot:
                 await ctx.send(err)
