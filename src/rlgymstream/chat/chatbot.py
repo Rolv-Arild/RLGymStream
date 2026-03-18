@@ -5,6 +5,7 @@ Uses twitchio v3 with EventSub websockets for chat.
 Commands:
     !help                      — list available commands
     !mmr <bot>                 — show a bot's MMR across all modes
+    !rating <bot> [mode]       — show raw mu and sigma values
     !pos <bot> [mode]          — show a bot's rank position (alias: !position)
     !lb [mode]                 — show top 5 leaderboard (default: 1v1)
     !best [mode]                   — show the #1 bot per mode (or one mode)
@@ -117,7 +118,7 @@ class ChatCommands(commands.Component):
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_help(self, ctx: commands.Context) -> None:
         await ctx.send(
-            "📋 !mmr · !pos · !lb · !best · !match · !h2h · !bot "
+            "📋 !mmr · !rating · !pos · !lb · !best · !match · !h2h · !bot "
             "· !stats · !winrate · !streak · !last · !predict · !map · !modes · !uptime"
         )
 
@@ -140,6 +141,32 @@ class ChatCommands(commands.Component):
                 parts.append(f"{MODE_DISPLAY[mode]}: {_mmr(r.mu)}")
         if parts:
             await ctx.send(f"📊 {bot.name} — {' | '.join(parts)}")
+        else:
+            await ctx.send(f"{bot.name} has no rated games yet.")
+
+    @commands.command(name="rating")
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_rating(self, ctx: commands.Context, *, args: str = "") -> None:
+        """!rating <bot> [mode] — show raw mu and sigma values."""
+        if not args:
+            await ctx.send("Usage: !rating <bot name> [mode]")
+            return
+
+        name, mode = self._split_name_and_mode(args)
+        bot, err = self._find_bot(name)
+        if not bot:
+            await ctx.send(err)
+            return
+        assert bot.id is not None
+
+        modes_to_check = [mode] if mode else ALL_MODES
+        parts = []
+        for m in modes_to_check:
+            r = self.bot._db.get_rating(bot.id, m)
+            if r.matches_played > 0 or mode:
+                parts.append(f"{MODE_DISPLAY[m]}: μ={r.mu:.2f} σ={r.sigma:.2f} ({r.matches_played} games)")
+        if parts:
+            await ctx.send(f"🔬 {bot.name} — {' | '.join(parts)}")
         else:
             await ctx.send(f"{bot.name} has no rated games yet.")
 

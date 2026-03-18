@@ -195,7 +195,8 @@ async def run(config: AppConfig) -> None:
 
             # Matchmake
             setup = pick_match(db, mode, last_map=last_map,
-                               sigma_priority_chance=config.sigma_priority_chance)
+                               sigma_priority_chance=config.sigma_priority_chance,
+                               anchored_bot_ids=anchored_bot_ids.get(mode.value, set()))
             if setup is None:
                 logger.warning(
                     "Not enough bots for %s (need %d, have %d), skipping…",

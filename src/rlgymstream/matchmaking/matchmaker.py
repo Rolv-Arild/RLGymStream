@@ -62,6 +62,7 @@ def pick_match(
         map_name: str | None = None,
         last_map: str | None = None,
         sigma_priority_chance: float = 0.0,
+        anchored_bot_ids: set[int] | None = None,
 ) -> MatchSetup | None:
     """Select bots for a match in the given mode.
 
@@ -81,10 +82,12 @@ def pick_match(
         candidates = [m for m in STANDARD_MAPS if m != last_map] or STANDARD_MAPS
         chosen_map = random.choice(candidates)
 
+    _anchored = anchored_bot_ids or set()
+
     if mode.is_solo_queue:
-        return _solo_queue_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance)
+        return _solo_queue_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance, _anchored)
     else:
-        return _standard_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance)
+        return _standard_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance, _anchored)
 
 
 # Maximum p*(1-p) is 0.25 (when p=0.5).  Used to normalise accept probability.
@@ -99,6 +102,7 @@ def _standard_pick(
         team_size: int,
         map_name: str,
         sigma_priority_chance: float,
+        anchored_bot_ids: set[int],
 ) -> MatchSetup | None:
     """Standard mode: each team is one bot (duplicated to fill team_size).
 
@@ -122,10 +126,11 @@ def _standard_pick(
         bot_ratings[bot.id] = make_rating(r.mu, r.sigma)
         bot_sigmas[bot.id] = r.sigma
 
-    # Identify the highest-sigma bot for priority matches
-    priority_bot = max(bots, key=lambda b: bot_sigmas[b.id])
-    use_sigma_priority = random.random() < sigma_priority_chance
-    if use_sigma_priority:
+    # Identify the highest-sigma bot for priority matches (exclude pinned bots)
+    unanchored = [b for b in bots if b.id not in anchored_bot_ids]
+    use_sigma_priority = bool(unanchored) and random.random() < sigma_priority_chance
+    priority_bot = max(unanchored, key=lambda b: bot_sigmas[b.id]) if unanchored else None
+    if use_sigma_priority and priority_bot:
         logger.debug("Sigma priority active: looking for %s (sigma=%.2f)",
                      priority_bot.name, bot_sigmas[priority_bot.id])
 
@@ -177,6 +182,7 @@ def _solo_queue_pick(
         team_size: int,
         map_name: str,
         sigma_priority_chance: float,
+        anchored_bot_ids: set[int],
 ) -> MatchSetup:
     """Solo-queue mode: duplicates allowed, but the two teams cannot be
     identical (same bots in the same quantities).
@@ -196,9 +202,10 @@ def _solo_queue_pick(
         bot_os[bot.id] = make_rating(r.mu, r.sigma)
         bot_sigmas[bot.id] = r.sigma
 
-    priority_bot = max(bots, key=lambda b: bot_sigmas[b.id])
-    use_sigma_priority = random.random() < sigma_priority_chance
-    if use_sigma_priority:
+    unanchored = [b for b in bots if b.id not in anchored_bot_ids]
+    priority_bot = max(unanchored, key=lambda b: bot_sigmas[b.id]) if unanchored else None
+    use_sigma_priority = bool(unanchored) and random.random() < sigma_priority_chance
+    if use_sigma_priority and priority_bot:
         logger.debug("Sigma priority (solo): looking for %s (sigma=%.2f)",
                      priority_bot.name, bot_sigmas[priority_bot.id])
 
@@ -215,7 +222,7 @@ def _solo_queue_pick(
             continue
 
         # Additionally require the highest-sigma bot when active
-        if use_sigma_priority:
+        if use_sigma_priority and priority_bot:
             all_ids = {b.id for b in blue} | {b.id for b in orange}
             if priority_bot.id not in all_ids:
                 continue
