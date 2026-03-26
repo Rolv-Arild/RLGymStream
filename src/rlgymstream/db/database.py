@@ -176,15 +176,17 @@ class Database:
             row = conn.execute("SELECT COUNT(*) FROM matches").fetchone()
             return row[0]
 
-    def get_recent_matches(self, limit: int = 20, mode: str | None = None) -> list[Match]:
+    def get_recent_matches(self, limit: int | None = 20, mode: str | None = None) -> list[Match]:
         with self._conn() as conn:
             q = "SELECT * FROM matches"
             params: list = []
             if mode:
                 q += " WHERE mode=?"
                 params.append(mode)
-            q += " ORDER BY id DESC LIMIT ?"
-            params.append(limit)
+            q += " ORDER BY id DESC"
+            if limit is not None:
+                q += " LIMIT ?"
+                params.append(limit)
             rows = conn.execute(q, params).fetchall()
             return [_row_to_match(r) for r in rows]
 

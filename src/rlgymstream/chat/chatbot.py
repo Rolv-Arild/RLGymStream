@@ -10,7 +10,7 @@ Commands:
     !lb [mode]                     — show top 5 leaderboard (default: 1v1)
     !best [mode]                   — show the #1 bot per mode (or one mode)
     !match                         — show current/last match info
-    !h2h <botA> vs <botB> [mode]   — head-to-head record
+    !h2h <botA> vs <botB> [mode|overall|standard|solo] — head-to-head record
     !h2h current [mode]            — head-to-head for the current match
     !bot <name> [mode]             — bot info (author, description, win/loss)
     !stats                         — total matches, number of bots, etc.
@@ -222,13 +222,36 @@ class ChatCommands(commands.Component):
     @commands.command(name="h2h", aliases=["headtohead"])
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_h2h(self, ctx: commands.Context, *, args: str = "") -> None:
-        """!h2h <botA> vs <botB> [mode] | !h2h current [mode]"""
+        """!h2h <botA> vs <botB> [mode|overall|standard|solo] | !h2h current [mode]"""
         if not args or self._is_help(args):
-            await ctx.send("Usage: !h2h <botA> vs <botB> [mode] or !h2h current")
+            await ctx.send(
+                "Usage: !h2h <botA> vs <botB> [mode|overall|standard|solo] "
+                "or !h2h current [mode]"
+            )
             return
+
+        # Mode group keywords → list of modes to show
+        _MODE_GROUPS: dict[str, list[str] | None] = {
+            "overall": None,  # single query with mode=None
+            "all": None,
+            "standard": ["1v1", "2v2", "3v3"],
+            "solo": ["solo_2v2", "solo_3v3"],
+        }
 
         # Check for "current" keyword → use current match
         rest, mode = self._split_name_and_mode(args)
+
+        # Detect mode-group keywords at the end of *rest*
+        mode_group: list[str] | None | str = "PER_MODE"  # sentinel: default per-mode
+        if mode is None:
+            rest_tokens = rest.rsplit(" ", 1)
+            if len(rest_tokens) == 2 and rest_tokens[1].lower() in _MODE_GROUPS:
+                keyword = rest_tokens[1].lower()
+                rest = rest_tokens[0].strip()
+                mode_group = _MODE_GROUPS[keyword]
+            elif rest.lower().endswith(" overall") or rest.lower().endswith(" all"):
+                # edge-case: the keyword is right after "current" or bot name
+                pass  # already handled above
 
         if rest.lower() == "current":
             with self.bot._overlay._lock:
@@ -254,10 +277,10 @@ class ChatCommands(commands.Component):
             if len(tokens) == 2:
                 name_a, name_b = tokens[0].strip(), tokens[1].strip()
             else:
-                await ctx.send("Usage: !h2h <botA> vs <botB> [mode] or !h2h current")
+                await ctx.send("Usage: !h2h <botA> vs <botB> [mode|overall|standard|solo]")
                 return
         else:
-            await ctx.send("Usage: !h2h <botA> vs <botB> [mode] or !h2h current")
+            await ctx.send("Usage: !h2h <botA> vs <botB> [mode|overall|standard|solo]")
             return
 
         bot_a, err_a = self._find_bot(name_a)
@@ -270,17 +293,45 @@ class ChatCommands(commands.Component):
             return
         assert bot_a.id is not None and bot_b.id is not None
 
-        h2h = self.bot._db.get_head_to_head(bot_a.id, bot_b.id, mode=mode)
-        mode_label = f" in {MODE_DISPLAY[mode]}" if mode else ""
-        if h2h["total"] == 0:
-            await ctx.send(f"{bot_a.name} and {bot_b.name} have never played each other{mode_label}.")
+        # If an explicit mode was parsed (e.g. "1v1"), show just that mode
+        if mode:
+            h2h = self.bot._db.get_head_to_head(bot_a.id, bot_b.id, mode=mode)
+            if h2h["total"] == 0:
+                await ctx.send(f"{bot_a.name} and {bot_b.name} have never played each other in {MODE_DISPLAY[mode]}.")
+                return
+            await ctx.send(
+                f"⚔️ {bot_a.name} vs {bot_b.name} in {MODE_DISPLAY[mode]}: "
+                f"{h2h['wins_a']}W-{h2h['wins_b']}L ({h2h['total']} games)"
+            )
             return
 
-        await ctx.send(
-            f"⚔️ {bot_a.name} vs {bot_b.name}{mode_label}: "
-            f"{h2h['wins_a']}W-{h2h['wins_b']}L "
-            f"({h2h['total']} games)"
-        )
+        # "overall" → single aggregated query
+        if mode_group is None:
+            h2h = self.bot._db.get_head_to_head(bot_a.id, bot_b.id, mode=None)
+            if h2h["total"] == 0:
+                await ctx.send(f"{bot_a.name} and {bot_b.name} have never played each other.")
+                return
+            await ctx.send(
+                f"⚔️ {bot_a.name} vs {bot_b.name} overall: "
+                f"{h2h['wins_a']}W-{h2h['wins_b']}L ({h2h['total']} games)"
+            )
+            return
+
+        # Per-mode breakdown (default, or "standard"/"solo" group)
+        modes_to_check = mode_group if isinstance(mode_group, list) else ALL_MODES
+        parts = []
+        for m in modes_to_check:
+            h2h = self.bot._db.get_head_to_head(bot_a.id, bot_b.id, mode=m)
+            if h2h["total"] == 0:
+                continue
+            parts.append(
+                f"{MODE_DISPLAY[m]}: {h2h['wins_a']}W-{h2h['wins_b']}L ({h2h['total']})"
+            )
+
+        if parts:
+            await ctx.send(f"⚔️ {bot_a.name} vs {bot_b.name} — {' | '.join(parts)}")
+        else:
+            await ctx.send(f"{bot_a.name} and {bot_b.name} have never played each other.")
 
     @commands.command(name="bot")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
@@ -428,16 +479,12 @@ class ChatCommands(commands.Component):
             return
         assert bot.id is not None
 
-        matches = self.bot._db.get_recent_matches(limit=100)
+        matches = self.bot._db.get_recent_matches(limit=None, mode=mode)
         bid = str(bot.id)
         streak_type = ""
         streak_count = 0
 
         for m in matches:
-            # Filter by mode if specified
-            if mode and m.mode != mode:
-                continue
-
             blue_ids = m.team_blue_ids.split(",")
             orange_ids = m.team_orange_ids.split(",")
             in_blue = bid in blue_ids
@@ -495,12 +542,11 @@ class ChatCommands(commands.Component):
                 await ctx.send(err)
                 return
 
-        # Fetch more than needed if filtering
-        fetch_limit = n * 20 if (mode or filter_bot) else n
-        matches = self.bot._db.get_recent_matches(limit=fetch_limit)
+        # Mode is filtered in SQL; when filtering by bot, fetch all matches for that mode
+        matches = self.bot._db.get_recent_matches(
+            limit=None if filter_bot else n, mode=mode,
+        )
 
-        if mode:
-            matches = [m for m in matches if m.mode == mode]
         if filter_bot:
             bid = str(filter_bot.id)
             matches = [m for m in matches

@@ -45,9 +45,12 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 
 | Command | Description |
 |---|---|
-| `!h2h` | Head-to-head record for the current match's bots |
-| `!h2h current [mode]` | Same, explicitly |
-| `!h2h <botA> vs <botB> [mode]` | Head-to-head record between any two bots |
+| `!h2h <botA> vs <botB>` | Per-mode head-to-head breakdown (default) |
+| `!h2h <botA> vs <botB> <mode>` | Head-to-head in a specific mode (e.g. `1v1`) |
+| `!h2h <botA> vs <botB> overall` | Aggregated record across all modes |
+| `!h2h <botA> vs <botB> standard` | Record in standard modes (1v1, 2v2, 3v3) |
+| `!h2h <botA> vs <botB> solo` | Record in solo queue modes (Solo 2v2, Solo 3v3) |
+| `!h2h current [mode]` | Head-to-head for the current match's bots |
 
 ## Predictions
 
@@ -70,7 +73,10 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 !streak Nexto 2s
 !pos Ripple 3v3
 !lb solo2v2
+!h2h Nexto vs Necto
 !h2h Nexto vs Necto 1v1
+!h2h Nexto vs Necto overall
+!h2h Nexto vs Necto standard
 !last 3 3v3
 !predict Nexto vs Necto
 !predict Nexto, Necto vs Ripple, Ordis
