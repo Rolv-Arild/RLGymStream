@@ -112,6 +112,7 @@ class OverlayState:
                 "recent_results": self.recent_results,
                 "head_to_head": self.head_to_head,
                 "total_matches": self.total_matches,
+                "session_matches": self.session_matches,
                 "version": self._version,
             }
             return json.dumps(data)

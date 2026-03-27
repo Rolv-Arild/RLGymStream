@@ -20,6 +20,7 @@ build-backend = "setuptools.build_meta"
 
 [project.scripts]
 rlgymstream = "rlgymstream.main:main"
+rlgymstream-chat = "rlgymstream.chat.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

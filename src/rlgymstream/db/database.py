@@ -230,6 +230,8 @@ class Database:
         a_str = str(bot_a_id)
         b_str = str(bot_b_id)
         wins_a, wins_b, draws = 0, 0, 0
+        goals_a, goals_b = 0, 0
+        total_duration = 0.0
         matches_list: list[Match] = []
 
         for row in rows:
@@ -248,6 +250,16 @@ class Database:
                 continue
 
             matches_list.append(m)
+            total_duration += m.duration_seconds
+
+            # Attribute team goals to each bot
+            if a_in_blue:
+                goals_a += m.score_blue
+                goals_b += m.score_orange
+            else:
+                goals_a += m.score_orange
+                goals_b += m.score_blue
+
             if m.winner == "draw":
                 draws += 1
             elif m.winner == "blue":
@@ -266,6 +278,9 @@ class Database:
             "wins_b": wins_b,
             "draws": draws,
             "total": len(matches_list),
+            "goals_a": goals_a,
+            "goals_b": goals_b,
+            "total_duration": total_duration,
             "matches": matches_list[-10:],  # last 10
         }
 

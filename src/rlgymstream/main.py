@@ -11,12 +11,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import subprocess
 import sys
 from datetime import datetime, timezone
 
 import uvicorn
 
-from rlgymstream.chat.chatbot import TwitchChatBot
 from rlgymstream.config import AppConfig, MatchMode
 from rlgymstream.db.database import Database
 from rlgymstream.db.models import Match as MatchModel
@@ -119,50 +119,6 @@ async def run(config: AppConfig) -> None:
         config.overlay_port,
     )
 
-    # Start Twitch chatbot if configured
-    chatbot: TwitchChatBot | None = None
-    if config.twitch_channel and config.twitch_client_id and config.twitch_client_secret:
-        # Resolve bot_id/owner_id from channel name if not explicitly set
-        if not config.twitch_bot_id or not config.twitch_owner_id:
-            import twitchio
-            async with twitchio.Client(
-                client_id=config.twitch_client_id,
-                client_secret=config.twitch_client_secret,
-            ) as temp_client:
-                await temp_client.login(load_tokens=False, save_tokens=False)
-                users = await temp_client.fetch_users(logins=[config.twitch_channel])
-                if users:
-                    channel_id = str(users[0].id)
-                    if not config.twitch_bot_id:
-                        config.twitch_bot_id = channel_id
-                        logger.info("Resolved bot_id from channel '%s': %s", config.twitch_channel, channel_id)
-                    if not config.twitch_owner_id:
-                        config.twitch_owner_id = channel_id
-                        logger.info("Resolved owner_id from channel '%s': %s", config.twitch_channel, channel_id)
-                else:
-                    logger.error("Could not find Twitch user '%s' — chatbot disabled", config.twitch_channel)
-                    config.twitch_bot_id = ""
-
-        if config.twitch_bot_id:
-            chatbot = TwitchChatBot(config, db, overlay_state)
-
-            async def _run_chatbot() -> None:
-                try:
-                    async with chatbot:
-                        # Only run the OAuth web adapter if tokens haven't been saved yet
-                        import os
-                        need_auth = not os.path.exists(".tio.tokens.json")
-                        await chatbot.start(with_adapter=need_auth)
-                except Exception:
-                    logger.exception("Twitch chatbot error")
-
-            asyncio.create_task(_run_chatbot())
-            logger.info("Twitch chatbot starting for channel #%s", config.twitch_channel)
-    else:
-        logger.info(
-            "Twitch chatbot disabled (need twitch channel, client_id, and client_secret)"
-        )
-
     # Graceful shutdown
     stop_event = asyncio.Event()
 
@@ -177,6 +133,20 @@ async def run(config: AppConfig) -> None:
         except NotImplementedError:
             # Windows doesn't support add_signal_handler
             pass
+
+    # Start Twitch chatbot as a separate subprocess
+    # Use a list so the monitor can update the reference on restart
+    chatbot_procs: list[subprocess.Popen] = []
+    chatbot_monitor_task: asyncio.Task | None = None
+    if config.twitch_channel and config.twitch_client_id and config.twitch_client_secret:
+        chatbot_procs.append(_start_chatbot_subprocess())
+        chatbot_monitor_task = asyncio.create_task(
+            _monitor_chatbot(chatbot_procs, stop_event)
+        )
+    else:
+        logger.info(
+            "Twitch chatbot disabled (need twitch channel, client_id, and client_secret)"
+        )
 
     # Match loop — resume counter from database
     match_counter = db.get_match_count()
@@ -326,8 +296,17 @@ async def run(config: AppConfig) -> None:
         logger.exception("Fatal error in match loop")
     finally:
         launcher.shutdown()
-        if chatbot is not None:
-            await chatbot.close()
+        if chatbot_monitor_task is not None:
+            chatbot_monitor_task.cancel()
+        if chatbot_procs:
+            proc = chatbot_procs[-1]
+            if proc.poll() is None:
+                logger.info("Stopping chatbot subprocess (pid=%d)", proc.pid)
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
         server.should_exit = True
         await server_task
 
@@ -441,6 +420,44 @@ def _rating_to_mmr(mu: float) -> int:
     Rocket League uses.  Does NOT reflect actual in-game rank.
     """
     return round(20 * mu + 100)
+
+
+# ── Chatbot subprocess management ───────────────────────────────────
+
+
+_CHATBOT_RESTART_DELAY = 5.0  # seconds before restarting a crashed chatbot
+
+
+def _start_chatbot_subprocess() -> subprocess.Popen:
+    """Launch ``python -m rlgymstream.chat`` as a child process."""
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "rlgymstream.chat"],
+        # Inherit stdout/stderr so logs are visible (or redirect to file)
+    )
+    logger.info("Chatbot subprocess started (pid=%d)", proc.pid)
+    return proc
+
+
+async def _monitor_chatbot(
+    procs: list[subprocess.Popen],
+    stop_event: asyncio.Event,
+) -> None:
+    """Watch the chatbot subprocess; restart it if it exits unexpectedly."""
+    while not stop_event.is_set():
+        proc = procs[-1]
+        retcode = proc.poll()
+        if retcode is not None:
+            if stop_event.is_set():
+                break
+            logger.warning(
+                "Chatbot subprocess exited (code=%s), restarting in %.0fs…",
+                retcode, _CHATBOT_RESTART_DELAY,
+            )
+            await _sleep_or_stop(_CHATBOT_RESTART_DELAY, stop_event)
+            if stop_event.is_set():
+                break
+            procs.append(_start_chatbot_subprocess())
+        await _sleep_or_stop(2.0, stop_event)
 
 
 if __name__ == "__main__":

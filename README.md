@@ -140,7 +140,19 @@ client_secret = ""   # from Twitch Developer Console
 
 The chatbot is disabled when `channel`, `client_id`, or `client_secret` are missing.
 
-**Available commands** (all have a 5-second per-user cooldown):
+When enabled, the chatbot runs as a **separate subprocess** (automatically launched
+and monitored by the main process). If it crashes, it restarts after 5 seconds.
+You can also run it standalone for debugging:
+
+```bash
+python -m rlgymstream.chat
+```
+
+This reads the same `rlgymstream.toml` and database, but gets live match state
+by polling the overlay HTTP API. The overlay server must be running (i.e. the
+main process must be up).
+
+**Available commands** — see [CHAT_COMMANDS.md](CHAT_COMMANDS.md) for full details:
 
 | Command | Description |
 |---|---|
@@ -222,7 +234,9 @@ src/rlgymstream/
 │   ├── matchmaker.py             # Accept/reject matchmaking, sigma priority, map rotation
 │   └── ratings.py                # OpenSkill PlackettLuce wrapper, cross-team duplicate handling
 ├── chat/
-│   └── chatbot.py                # TwitchIO chatbot with viewer commands
+│   ├── __main__.py               # Standalone chatbot entry point (python -m rlgymstream.chat)
+│   ├── chatbot.py                # TwitchIO chatbot with viewer commands
+│   └── overlay_proxy.py          # HTTP-polling mirror of OverlayState for subprocess use
 └── overlay/
     ├── server.py                 # FastAPI app with SSE + JSON API
     ├── state.py                  # Thread-safe shared state

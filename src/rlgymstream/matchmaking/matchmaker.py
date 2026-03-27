@@ -120,16 +120,19 @@ def _standard_pick(
     # Pre-compute ratings for all bots
     bot_ratings: dict[int, PlackettLuceRating] = {}
     bot_sigmas: dict[int, float] = {}
+    bot_games: dict[int, int] = {}
     for bot in bots:
         assert bot.id is not None
         r = db.get_rating(bot.id, mode.value)
         bot_ratings[bot.id] = make_rating(r.mu, r.sigma)
         bot_sigmas[bot.id] = r.sigma
+        bot_games[bot.id] = r.matches_played
 
-    # Identify the highest-sigma bot for priority matches (exclude pinned bots)
+    # Identify the highest-sigma bot for priority matches (exclude pinned bots).
+    # Break ties by fewest games played.
     unanchored = [b for b in bots if b.id not in anchored_bot_ids]
     use_sigma_priority = bool(unanchored) and random.random() < sigma_priority_chance
-    priority_bot = max(unanchored, key=lambda b: bot_sigmas[b.id]) if unanchored else None
+    priority_bot = max(unanchored, key=lambda b: (bot_sigmas[b.id], -bot_games[b.id])) if unanchored else None
     if use_sigma_priority and priority_bot:
         logger.debug("Sigma priority active: looking for %s (sigma=%.2f)",
                      priority_bot.name, bot_sigmas[priority_bot.id])
@@ -191,34 +194,72 @@ def _solo_queue_pick(
     once, then matchups are generated until one has p*(1-p)/0.25 ≥ threshold.
     Every 1000 failed attempts the threshold is squared to ensure convergence.
 
+    A separate *teammate* threshold is also rolled: within each team, every
+    pair of distinct bots must have pairwise p*(1-p)/0.25 ≥ teammate_threshold.
+    This prevents extreme skill gaps within a team.
+
     With *sigma_priority_chance* probability, an additional criterion is
     applied: the matchup must also include the highest-sigma bot.
     """
     bot_os: dict[int, PlackettLuceRating] = {}
     bot_sigmas: dict[int, float] = {}
+    bot_games: dict[int, int] = {}
     for bot in bots:
         assert bot.id is not None
         r = db.get_rating(bot.id, mode.value)
         bot_os[bot.id] = make_rating(r.mu, r.sigma)
         bot_sigmas[bot.id] = r.sigma
+        bot_games[bot.id] = r.matches_played
 
+    # Break sigma ties by fewest games played
     unanchored = [b for b in bots if b.id not in anchored_bot_ids]
-    priority_bot = max(unanchored, key=lambda b: bot_sigmas[b.id]) if unanchored else None
+    priority_bot = max(unanchored, key=lambda b: (bot_sigmas[b.id], -bot_games[b.id])) if unanchored else None
     use_sigma_priority = bool(unanchored) and random.random() < sigma_priority_chance
     if use_sigma_priority and priority_bot:
         logger.debug("Sigma priority (solo): looking for %s (sigma=%.2f)",
                      priority_bot.name, bot_sigmas[priority_bot.id])
 
+    # Precompute pairwise evenness between all bots for teammate checks.
+    # pairwise_weight[(a,b)] = p*(1-p)/0.25  where p = predict_win([a],[b]).
+    bot_id_list = list(bot_os.keys())
+    pairwise_weight: dict[tuple[int, int], float] = {}
+    for i, id_a in enumerate(bot_id_list):
+        for id_b in bot_id_list[i + 1:]:
+            probs = _os_model.predict_win([[bot_os[id_a]], [bot_os[id_b]]])
+            p = probs[0]
+            w = p * (1 - p) / _MAX_WEIGHT
+            pairwise_weight[(id_a, id_b)] = w
+            pairwise_weight[(id_b, id_a)] = w
+
+    def _teammates_even(team: list[Bot], thresh: float) -> bool:
+        """Check that every pair of distinct bots on the team is reasonably close."""
+        for i in range(len(team)):
+            for j in range(i + 1, len(team)):
+                a_id, b_id = team[i].id, team[j].id
+                if a_id == b_id:
+                    continue  # same bot duplicated — skip
+                if pairwise_weight.get((a_id, b_id), 0) < thresh:
+                    return False
+        return True
+
     threshold = random.random()
+    teammate_threshold = random.random()
     for attempt in range(_MAX_RETRIES):
         if attempt > 0 and attempt % 1000 == 0:
             threshold *= threshold
+            teammate_threshold *= teammate_threshold
 
         blue = random.choices(bots, k=team_size)
         orange = random.choices(bots, k=team_size)
 
         # Reject if teams are identical (same bots in same quantities)
         if sorted(b.id for b in blue) == sorted(b.id for b in orange):
+            continue
+
+        # Check teammate evenness — no huge skill gaps within a team
+        if not _teammates_even(blue, teammate_threshold):
+            continue
+        if not _teammates_even(orange, teammate_threshold):
             continue
 
         # Additionally require the highest-sigma bot when active

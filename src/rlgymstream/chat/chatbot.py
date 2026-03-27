@@ -12,6 +12,7 @@ Commands:
     !match                         — show current/last match info
     !h2h <botA> vs <botB> [mode|overall|standard|solo] — head-to-head record
     !h2h current [mode]            — head-to-head for the current match
+    !goals <botA> vs <botB> [mode|overall|standard|solo] — head-to-head goal totals + duration
     !bot <name> [mode]             — bot info (author, description, win/loss)
     !stats                         — total matches, number of bots, etc.
     !winrate <bot> [mode]          — win rate per mode or for a specific mode
@@ -126,8 +127,8 @@ class ChatCommands(commands.Component):
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_help(self, ctx: commands.Context) -> None:
         await ctx.send(
-            "📋 !mmr · !rating · !pos · !lb · !best · !match · !h2h · !bot "
-            "· !stats · !winrate · !streak · !last · !predict · !map · !modes · !uptime"
+            "📋 !mmr · !rating · !pos · !lb · !best · !match · !h2h · !goals "
+            "· !bot · !stats · !winrate · !streak · !last · !predict · !map · !modes · !uptime"
         )
 
     @commands.command(name="mmr")
@@ -577,6 +578,106 @@ class ChatCommands(commands.Component):
             lines.append(f"{blue_names} {m.score_blue}-{m.score_orange} {orange_names} ({m.mode}, {map_display})")
 
         await ctx.send(" | ".join(lines))
+
+    @commands.command(name="goals")
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_goals(self, ctx: commands.Context, *, args: str = "") -> None:
+        """!goals <botA> vs <botB> [mode|overall|standard|solo] — head-to-head goal totals + total duration."""
+        if not args or self._is_help(args):
+            await ctx.send("Usage: !goals <botA> vs <botB> [mode|overall|standard|solo]")
+            return
+
+        _MODE_GROUPS: dict[str, list[str] | None] = {
+            "overall": None,
+            "all": None,
+            "standard": ["1v1", "2v2", "3v3"],
+            "solo": ["solo_2v2", "solo_3v3"],
+        }
+
+        rest, mode = self._split_name_and_mode(args)
+
+        # Detect mode-group keywords at the end
+        mode_group: list[str] | None | str = "PER_MODE"
+        if mode is None:
+            rest_tokens = rest.rsplit(" ", 1)
+            if len(rest_tokens) == 2 and rest_tokens[1].lower() in _MODE_GROUPS:
+                keyword = rest_tokens[1].lower()
+                rest = rest_tokens[0].strip()
+                mode_group = _MODE_GROUPS[keyword]
+
+        # Parse bot names
+        if " vs " in rest.lower():
+            sep = " vs " if " vs " in rest else " VS "
+            parts = rest.split(sep, 1)
+            name_a, name_b = parts[0].strip(), parts[1].strip()
+        elif " " in rest.strip():
+            tokens = rest.strip().rsplit(" ", 1)
+            name_a, name_b = tokens[0].strip(), tokens[1].strip()
+        else:
+            await ctx.send("Usage: !goals <botA> vs <botB> [mode|overall|standard|solo]")
+            return
+
+        bot_a, err_a = self._find_bot(name_a)
+        if not bot_a:
+            await ctx.send(err_a)
+            return
+        bot_b, err_b = self._find_bot(name_b)
+        if not bot_b:
+            await ctx.send(err_b)
+            return
+        assert bot_a.id is not None and bot_b.id is not None
+
+        def _fmt_duration(seconds: float) -> str:
+            h, rem = divmod(int(seconds), 3600)
+            m, s = divmod(rem, 60)
+            if h > 0:
+                return f"{h}h{m}m"
+            return f"{m}m{s}s"
+
+        def _goals_line(h2h: dict, label: str) -> str | None:
+            if h2h["total"] == 0:
+                return None
+            avg_a = h2h["goals_a"] / h2h["total"]
+            avg_b = h2h["goals_b"] / h2h["total"]
+            dur = _fmt_duration(h2h["total_duration"])
+            return (
+                f"{label}: {h2h['goals_a']}-{h2h['goals_b']} goals "
+                f"({avg_a:.1f}-{avg_b:.1f}/game, {dur} total)"
+            )
+
+        # Specific mode
+        if mode:
+            h2h = self.bot._db.get_head_to_head(bot_a.id, bot_b.id, mode=mode)
+            line = _goals_line(h2h, MODE_DISPLAY[mode])
+            if not line:
+                await ctx.send(f"{bot_a.name} and {bot_b.name} have never played in {MODE_DISPLAY[mode]}.")
+                return
+            await ctx.send(f"⚽ {bot_a.name} vs {bot_b.name} — {line}")
+            return
+
+        # Overall
+        if mode_group is None:
+            h2h = self.bot._db.get_head_to_head(bot_a.id, bot_b.id, mode=None)
+            line = _goals_line(h2h, "Overall")
+            if not line:
+                await ctx.send(f"{bot_a.name} and {bot_b.name} have never played each other.")
+                return
+            await ctx.send(f"⚽ {bot_a.name} vs {bot_b.name} — {line}")
+            return
+
+        # Per-mode breakdown
+        modes_to_check = mode_group if isinstance(mode_group, list) else ALL_MODES
+        parts_out = []
+        for m in modes_to_check:
+            h2h = self.bot._db.get_head_to_head(bot_a.id, bot_b.id, mode=m)
+            line = _goals_line(h2h, MODE_DISPLAY[m])
+            if line:
+                parts_out.append(line)
+
+        if parts_out:
+            await ctx.send(f"⚽ {bot_a.name} vs {bot_b.name} — {' | '.join(parts_out)}")
+        else:
+            await ctx.send(f"{bot_a.name} and {bot_b.name} have never played each other.")
 
     @commands.command(name="predict")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)

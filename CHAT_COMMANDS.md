@@ -52,6 +52,16 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 | `!h2h <botA> vs <botB> solo` | Record in solo queue modes (Solo 2v2, Solo 3v3) |
 | `!h2h current [mode]` | Head-to-head for the current match's bots |
 
+## Goal Stats
+
+| Command | Description |
+|---|---|
+| `!goals <botA> vs <botB>` | Per-mode goal totals, averages, and total match duration |
+| `!goals <botA> vs <botB> <mode>` | Goals in a specific mode |
+| `!goals <botA> vs <botB> overall` | Aggregated goals across all modes |
+| `!goals <botA> vs <botB> standard` | Goals in standard modes |
+| `!goals <botA> vs <botB> solo` | Goals in solo queue modes |
+
 ## Predictions
 
 | Command | Description |
@@ -77,6 +87,8 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 !h2h Nexto vs Necto 1v1
 !h2h Nexto vs Necto overall
 !h2h Nexto vs Necto standard
+!goals Nexto vs Necto
+!goals Nexto vs Necto 1v1
 !last 3 3v3
 !predict Nexto vs Necto
 !predict Nexto, Necto vs Ripple, Ordis
