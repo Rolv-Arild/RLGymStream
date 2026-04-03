@@ -1,9 +1,13 @@
 """Matchmaking – select bots for a given mode.
 
-A random threshold is rolled once per match, then matchups are generated
-until one has  p_win × (1 − p_win) / 0.25  ≥  threshold.  This favours
-balanced matchups while allowing occasional mismatches.  Every 1000 failed
-attempts the threshold is squared to guarantee convergence.
+Standard modes use Temperature-Controlled Active Learning: for every
+possible pair, a Beta distribution is formed from the OpenSkill prior
+(weighted by ``n_prior``) plus the empirical head-to-head record.  The
+Beta variance is raised to ``1/temperature`` to give a selection weight.
+High-variance (uncertain) matchups are naturally favoured.
+
+Solo-queue modes use accept/reject sampling with a random threshold for
+match evenness and a separate threshold for teammate evenness.
 """
 
 from __future__ import annotations
@@ -63,6 +67,8 @@ def pick_match(
         last_map: str | None = None,
         sigma_priority_chance: float = 0.0,
         anchored_bot_ids: set[int] | None = None,
+        n_prior: float = 1.0,
+        temperature: float = 1.0,
 ) -> MatchSetup | None:
     """Select bots for a match in the given mode.
 
@@ -87,7 +93,9 @@ def pick_match(
     if mode.is_solo_queue:
         return _solo_queue_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance, _anchored)
     else:
-        return _standard_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance, _anchored)
+        return _standard_pick(db, bots, mode, team_size, chosen_map,
+                              sigma_priority_chance, _anchored,
+                              n_prior=n_prior, temperature=temperature)
 
 
 # Maximum p*(1-p) is 0.25 (when p=0.5).  Used to normalise accept probability.
@@ -103,21 +111,27 @@ def _standard_pick(
         map_name: str,
         sigma_priority_chance: float,
         anchored_bot_ids: set[int],
+        n_prior: float = 1.0,
+        temperature: float = 1.0,
 ) -> MatchSetup | None:
     """Standard mode: each team is one bot (duplicated to fill team_size).
 
-    Uses roll-once accept/reject sampling — a random threshold is chosen
-    once, then matchups are generated until one has p*(1-p)/0.25 ≥ threshold.
-    Every 1000 failed attempts the threshold is squared to ensure convergence.
+    Uses Temperature-Controlled Active Learning:
+      1. For every unique bot pair, compute the expected win probability
+         from OpenSkill and use it as a Beta prior (weighted by *n_prior*).
+      2. Fold in empirical head-to-head wins/losses.
+      3. Compute the resulting Beta variance — high variance means we're
+         uncertain about the true win probability of this matchup.
+      4. Raise variance to ``1/temperature`` to control exploration.
+      5. Normalise into a probability distribution and sample one pair.
 
-    With *sigma_priority_chance* probability, an additional criterion is
-    applied: the matchup must also include the highest-sigma bot,
-    helping under-played bots get calibrated faster.
+    With *sigma_priority_chance* probability, only pairs that include
+    the highest-sigma (least-calibrated) bot are considered.
     """
     if len(bots) < 2:
         return None
 
-    # Pre-compute ratings for all bots
+    # Pre-compute ratings
     bot_ratings: dict[int, PlackettLuceRating] = {}
     bot_sigmas: dict[int, float] = {}
     bot_games: dict[int, int] = {}
@@ -128,39 +142,69 @@ def _standard_pick(
         bot_sigmas[bot.id] = r.sigma
         bot_games[bot.id] = r.matches_played
 
-    # Identify the highest-sigma bot for priority matches (exclude pinned bots).
-    # Break ties by fewest games played.
+    # Sigma priority: restrict to pairs containing the highest-sigma bot
     unanchored = [b for b in bots if b.id not in anchored_bot_ids]
     use_sigma_priority = bool(unanchored) and random.random() < sigma_priority_chance
-    priority_bot = max(unanchored, key=lambda b: (bot_sigmas[b.id], -bot_games[b.id])) if unanchored else None
+    priority_bot = max(
+        unanchored,
+        key=lambda b: (bot_sigmas[b.id], -bot_games[b.id]),
+    ) if unanchored else None
     if use_sigma_priority and priority_bot:
         logger.debug("Sigma priority active: looking for %s (sigma=%.2f)",
                      priority_bot.name, bot_sigmas[priority_bot.id])
 
-    threshold = random.random()
-    for attempt in range(_MAX_RETRIES):
-        if attempt > 0 and attempt % 1000 == 0:
-            threshold *= threshold
+    # Bulk h2h lookup — one pass through match history
+    h2h = db.get_pairwise_h2h(mode.value)
 
+    # Build weighted list of all unique pairs
+    pairs: list[tuple[Bot, Bot]] = []
+    weights: list[float] = []
+    inv_temp = 1.0 / max(temperature, 1e-9)
+
+    for i in range(len(bots)):
+        for j in range(i + 1, len(bots)):
+            a, b = bots[i], bots[j]
+
+            # When sigma priority is active, only keep pairs with the priority bot
+            if use_sigma_priority and priority_bot:
+                if a.id != priority_bot.id and b.id != priority_bot.id:
+                    continue
+
+            # 1. Expected win probability from OpenSkill
+            probs = _os_model.predict_win(
+                [[bot_ratings[a.id]], [bot_ratings[b.id]]],
+            )
+            expected_a = probs[0]
+
+            # 2. Beta prior from the model prediction
+            alpha_prior = expected_a * n_prior
+            beta_prior = (1.0 - expected_a) * n_prior
+
+            # 3. Integrate empirical wins/losses
+            key = (min(a.id, b.id), max(a.id, b.id))
+            wins_a, wins_b = 0, 0
+            if key in h2h:
+                if a.id == key[0]:
+                    wins_a, wins_b = h2h[key]
+                else:
+                    wins_b, wins_a = h2h[key]
+
+            alpha = alpha_prior + wins_a
+            beta = beta_prior + wins_b
+
+            # 4. Beta distribution variance
+            total = alpha + beta
+            variance = (alpha * beta) / ((total ** 2) * (total + 1))
+
+            # 5. Temperature weighting
+            weight = variance ** inv_temp
+
+            pairs.append((a, b))
+            weights.append(weight)
+
+    if not pairs:
+        # Edge case: sigma priority filtered everything out
         a, b = random.sample(bots, 2)
-        os_a = bot_ratings[a.id]
-        os_b = bot_ratings[b.id]
-
-        # Accept/reject based on match evenness
-        probs = _os_model.predict_win([[os_a], [os_b]])
-        p = probs[0]
-        weight = p * (1 - p)
-        if weight / _MAX_WEIGHT < threshold:
-            continue
-
-        # Additionally require the highest-sigma bot when active
-        if use_sigma_priority:
-            if a.id != priority_bot.id and b.id != priority_bot.id:
-                continue
-
-        # Randomly assign blue vs orange
-        if random.random() < 0.5:
-            a, b = b, a
         return MatchSetup(
             mode=mode,
             team_blue=[a] * team_size,
@@ -168,8 +212,13 @@ def _standard_pick(
             map_name=map_name,
         )
 
-    # Fallback: accept any matchup
-    a, b = random.sample(bots, 2)
+    # 6. Probabilistic selection
+    (a, b) = random.choices(pairs, weights=weights, k=1)[0]
+
+    # Randomly assign blue vs orange
+    if random.random() < 0.5:
+        a, b = b, a
+
     return MatchSetup(
         mode=mode,
         team_blue=[a] * team_size,

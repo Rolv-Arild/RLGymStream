@@ -215,6 +215,42 @@ class Database:
                 losses += 1
         return wins, losses, draws
 
+    def get_pairwise_h2h(self, mode: str) -> dict[tuple[int, int], tuple[int, int]]:
+        """Return pairwise win counts for every bot pair in a mode.
+
+        Built in a single pass through the match history.
+        Keys are ``(min_id, max_id)``.
+        Values are ``(wins_for_min_id, wins_for_max_id)``.
+        Draws are ignored.
+        """
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT team_blue_ids, team_orange_ids, winner FROM matches WHERE mode=?",
+                (mode,),
+            ).fetchall()
+
+        h2h: dict[tuple[int, int], list[int]] = {}
+        for row in rows:
+            winner = row["winner"]
+            if winner not in ("blue", "orange"):
+                continue
+            blue_ids = {int(x) for x in row["team_blue_ids"].split(",")}
+            orange_ids = {int(x) for x in row["team_orange_ids"].split(",")}
+            for blue_id in blue_ids:
+                for orange_id in orange_ids:
+                    if blue_id == orange_id:
+                        continue
+                    key = (min(blue_id, orange_id), max(blue_id, orange_id))
+                    if key not in h2h:
+                        h2h[key] = [0, 0]
+                    winning_id = blue_id if winner == "blue" else orange_id
+                    if winning_id == key[0]:
+                        h2h[key][0] += 1
+                    else:
+                        h2h[key][1] += 1
+
+        return {k: (v[0], v[1]) for k, v in h2h.items()}
+
     def get_head_to_head(self, bot_a_id: int, bot_b_id: int,
                          mode: str | None = None) -> dict:
 

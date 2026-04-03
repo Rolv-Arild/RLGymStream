@@ -1,8 +1,10 @@
 """Visualize the distribution of win probabilities for accepted matchups.
 
-Simulates the accept/reject sampling from the matchmaker and plots:
-1. The raw win-probability distribution of all random matchups
-2. The accepted distribution after p*(1-p) filtering
+Simulates matchmaking strategies and plots their win-probability distributions:
+1. Random matchups (baseline)
+2. Accept/reject p*(1-p) filtering (used for solo queue)
+3. Roll-once accept/reject (legacy)
+4. Temperature-Controlled Active Learning (used for standard modes)
 
 Usage:
     python scripts/matchup_distribution.py                 # uses data/rlgymstream.db
@@ -24,9 +26,15 @@ _MAX_WEIGHT = 0.25
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     n_samples = 1_00_000
+    n_prior = 1.0
+    temperature = 1.0
     for i, a in enumerate(sys.argv[1:]):
         if a == "--samples" and i + 2 < len(sys.argv):
             n_samples = int(sys.argv[i + 2])
+        if a == "--n-prior" and i + 2 < len(sys.argv):
+            n_prior = float(sys.argv[i + 2])
+        if a == "--temperature" and i + 2 < len(sys.argv):
+            temperature = float(sys.argv[i + 2])
 
     db_path = Path(args[0]) if args else Path("data/rlgymstream.db")
     if not db_path.exists():
@@ -35,6 +43,8 @@ def main():
 
     config = AppConfig.from_toml()
     configure_defaults(config.default_mu, config.default_sigma)
+    n_prior = config.matchmaker_n_prior if n_prior == 1.0 else n_prior
+    temperature = config.matchmaker_temperature if temperature == 1.0 else temperature
     db = Database(db_path)
 
     modes = config.mode_rotation
@@ -64,7 +74,6 @@ def main():
 
         raw_probs = []
         accepted_probs = []
-        threshold_probs = []  # "roll once, search" variant
         team_size = mode.team_size
 
         def gen_matchup():
@@ -91,26 +100,66 @@ def main():
             if random.random() < weight / _MAX_WEIGHT:
                 accepted_probs.append(p)
 
-        # "Roll once, search" variant: roll a threshold, then find a matchup that exceeds it
-        # Every 1000 failed attempts, square the threshold to make it easier
-        n_threshold_matches = len(accepted_probs)  # same number for fair comparison
-        for _ in range(n_threshold_matches):
-            threshold = random.random()
-            for _attempt in range(10000):
-                if _attempt > 0 and _attempt % 1000 == 0:
-                    threshold *= threshold
-                p = gen_matchup()
-                if p * (1 - p) / _MAX_WEIGHT >= threshold:
-                    threshold_probs.append(p)
-                    break
-
         bins = 50
         ax.hist(raw_probs, bins=bins, alpha=0.3, label=f"Random ({len(raw_probs)})",
                 density=True, color="gray")
-        ax.hist(accepted_probs, bins=bins, alpha=0.5, label=f"Current ({len(accepted_probs)})",
+        ax.hist(accepted_probs, bins=bins, alpha=0.5, label=f"Accept/reject ({len(accepted_probs)})",
                 density=True, color="steelblue")
-        ax.hist(threshold_probs, bins=bins, alpha=0.5, label=f"Roll-once ({len(threshold_probs)})",
-                density=True, color="orange")
+
+        # Temperature-Controlled Active Learning (standard modes only)
+        if not mode.is_solo_queue and len(bots) >= 2:
+            h2h = db.get_pairwise_h2h(mode.value)
+            inv_temp = 1.0 / max(temperature, 1e-9)
+
+            pairs = []
+            pair_weights = []
+            pair_probs_blue = []  # store the expected blue win prob per pair
+
+            for i in range(len(bots)):
+                for j in range(i + 1, len(bots)):
+                    a, b = bots[i], bots[j]
+                    probs = _os_model.predict_win(
+                        [[bot_ratings[a.id]], [bot_ratings[b.id]]],
+                    )
+                    expected_a = probs[0]
+
+                    alpha_prior = expected_a * n_prior
+                    beta_prior = (1.0 - expected_a) * n_prior
+
+                    key = (min(a.id, b.id), max(a.id, b.id))
+                    wins_a, wins_b = 0, 0
+                    if key in h2h:
+                        if a.id == key[0]:
+                            wins_a, wins_b = h2h[key]
+                        else:
+                            wins_b, wins_a = h2h[key]
+
+                    alpha = alpha_prior + wins_a
+                    beta = beta_prior + wins_b
+                    total = alpha + beta
+                    variance = (alpha * beta) / ((total ** 2) * (total + 1))
+                    w = variance ** inv_temp
+
+                    pairs.append((a, b))
+                    pair_weights.append(w)
+                    pair_probs_blue.append(expected_a)
+
+            if pairs:
+                # Sample the same number as accepted matchups
+                n_tcal = len(accepted_probs)
+                selected_indices = random.choices(range(len(pairs)), weights=pair_weights, k=n_tcal)
+                # For each selected pair, randomly assign blue/orange → 50% flip
+                tcal_probs = []
+                for si in selected_indices:
+                    p = pair_probs_blue[si]
+                    if random.random() < 0.5:
+                        p = 1.0 - p
+                    tcal_probs.append(p)
+
+                ax.hist(tcal_probs, bins=bins, alpha=0.5,
+                        label=f"TCAL T={temperature:.1f} n={n_prior:.1f} ({len(tcal_probs)})",
+                        density=True, color="green")
+
         ax.set_title(f"{mode.display_name}")
         ax.set_xlabel("Blue win probability")
         ax.set_ylabel("Density")

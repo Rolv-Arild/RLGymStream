@@ -9,6 +9,12 @@ leaderboard_delay = 15
 sigma_priority_chance = 0.1   # chance to force the most uncertain bot into a match (0.0–1.0)
 mercy_goal_diff = 8           # end match early if goal difference reaches this
 
+# Standard-mode matchmaking: Temperature-Controlled Active Learning
+# n_prior: weight of the OpenSkill prior in the Beta distribution (higher = trust ratings more)
+# temperature: exploration/exploitation dial (1.0 = proportional, <1 = greedy, >1 = random)
+matchmaker_n_prior = 1.0
+matchmaker_temperature = 1.0
+
 # Modes to rotate through.  Options: "1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"
 mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 

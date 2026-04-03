@@ -88,6 +88,8 @@ class AppConfig:
     leaderboard_delay: float = 15.0 # seconds to show leaderboard between matches
     sigma_priority_chance: float = 0.1  # chance to force highest-sigma bot into a match
     mercy_goal_diff: int = 8            # end match early if goal diff reaches this
+    matchmaker_n_prior: float = 1.0     # Beta prior weight for h2h matchmaking (standard modes)
+    matchmaker_temperature: float = 1.0 # exploration/exploitation dial (lower = greedier)
     default_mu: dict[str, float] = field(default_factory=lambda: {})   # mode → starting mu (fallback: 25.0)
     default_sigma: dict[str, float] = field(default_factory=lambda: {})  # mode → starting sigma (fallback: 25/3)
     twitch_channel: str = ""      # Twitch channel name to join (empty = chatbot disabled)
@@ -137,6 +139,12 @@ class AppConfig:
             mu = 30.5
             sigma = 3.0
             # modes = ["1v1", "2v2"]  # optional: only anchor these modes (default: all)
+
+            # Standard-mode matchmaking uses Temperature-Controlled
+            # Active Learning.  n_prior controls how much to trust the
+            # OpenSkill prior; temperature controls exploration.
+            matchmaker_n_prior = 1.0
+            matchmaker_temperature = 1.0
         """
         path = Path(path)
         cfg = cls()
@@ -161,6 +169,10 @@ class AppConfig:
                 cfg.sigma_priority_chance = float(data["sigma_priority_chance"])
             if "mercy_goal_diff" in data:
                 cfg.mercy_goal_diff = int(data["mercy_goal_diff"])
+            if "matchmaker_n_prior" in data:
+                cfg.matchmaker_n_prior = float(data["matchmaker_n_prior"])
+            if "matchmaker_temperature" in data:
+                cfg.matchmaker_temperature = float(data["matchmaker_temperature"])
             if "default_mu" in data:
                 val = data["default_mu"]
                 if isinstance(val, dict):
