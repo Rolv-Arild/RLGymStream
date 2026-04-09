@@ -348,6 +348,15 @@ function renderIdleLeaderboard(state, el) {
     };
     const totalMatches = state.total_matches || 0;
 
+    // Compute scale factor so all rows fit on screen.
+    // Available height ≈ 1080 - header(~100) - footer(~36) - colTitle(~30) - padding(72) ≈ 842px
+    // Each row at scale 1 ≈ 44px content + 3px gap = 47px
+    const maxEntries = Math.max(...modes.map(mk => (boards[mk] || []).length));
+    const availableHeight = 842;
+    const rowHeight = 47;
+    const maxFit = availableHeight / rowHeight;
+    const lbScale = Math.min(1, maxFit / maxEntries);
+
     const columns = modes.map(mk => {
         const entries = boards[mk] || [];
         const label = modeLabels[mk] || mk;
@@ -373,7 +382,7 @@ function renderIdleLeaderboard(state, el) {
     }).join("");
 
     el.innerHTML = `
-        <div class="idle-lb-container">
+        <div class="idle-lb-container" style="--lb-scale: ${lbScale}">
             <div class="idle-lb-header">
                 <img class="idle-lb-logo" src="/static/rlgym.png" alt="">
                 <div class="idle-lb-title">LEADERBOARD</div>

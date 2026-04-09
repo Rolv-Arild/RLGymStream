@@ -387,7 +387,8 @@ body {
 .idle-lb-columns {
     display: flex;
     gap: 16px;
-    flex: 1;
+    flex: 1 1 0;
+    min-height: 0;
     overflow: hidden;
 }
 
@@ -412,25 +413,27 @@ body {
 }
 
 .idle-lb-col-body {
-    flex: 1;
+    flex: 1 1 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: calc(3px * var(--lb-scale, 1));
     overflow: hidden;
 }
 
 .idle-lb-row {
     display: flex;
     align-items: center;
-    padding: 5px 10px;
+    padding: calc(5px * var(--lb-scale, 1)) 10px;
     background: var(--bg-light);
     border-radius: 6px;
+    flex-shrink: 0;
 }
 
 .idle-lb-rank {
     width: 36px;
     font-family: 'Orbitron', sans-serif;
-    font-size: 14px;
+    font-size: calc(14px * var(--lb-scale, 1));
     font-weight: 700;
     text-align: center;
     flex-shrink: 0;
@@ -446,7 +449,7 @@ body {
 }
 
 .idle-lb-name {
-    font-size: 15px;
+    font-size: calc(15px * var(--lb-scale, 1));
     font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
@@ -454,13 +457,13 @@ body {
 }
 
 .idle-lb-games {
-    font-size: 10px;
+    font-size: calc(10px * var(--lb-scale, 1));
     color: var(--text-dim);
 }
 
 .idle-lb-mmr {
     font-family: 'Orbitron', sans-serif;
-    font-size: 16px;
+    font-size: calc(16px * var(--lb-scale, 1));
     color: var(--gold);
     text-align: right;
     min-width: 56px;
