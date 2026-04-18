@@ -117,6 +117,7 @@ class ShowdownState:
     score_orange: int = 0
     # For pregame / live: which side is bot_a on
     a_is_blue: bool = True
+    countdown_end: float = 0.0  # Unix timestamp when the opening countdown ends
     _version: int = 0
 
     def bump(self):
@@ -137,6 +138,7 @@ class ShowdownState:
             "score_blue": self.score_blue,
             "score_orange": self.score_orange,
             "a_is_blue": self.a_is_blue,
+            "countdown_end": self.countdown_end,
             "version": self._version,
         }
         return json.dumps(d)
@@ -335,11 +337,13 @@ SERIES_MODES = [
 ]
 
 
-async def run_showdown(bot_a: BotInfo, bot_b: BotInfo, port: int, quick: bool = False) -> None:
-    # In quick mode: Bo1 series, short delays
+async def run_showdown(bot_a: BotInfo, bot_b: BotInfo, port: int, quick: bool = False,
+                       resume: dict[str, tuple[int, int]] | None = None,
+                       skip_opening: bool = False) -> None:
+    # In quick mode: Bo3 series, short delays
     best_of = 3 if quick else 7
     mercy = 1 if quick else 0
-    t_opening = 10 if quick else 300
+    t_opening = 10 if quick else 180
     t_series_intro = 5 if quick else 60
     t_pregame = 5 if quick else 30
     t_postgame = 5 if quick else 60
@@ -347,6 +351,8 @@ async def run_showdown(bot_a: BotInfo, bot_b: BotInfo, port: int, quick: bool = 
 
     if quick:
         logger.info("⚡ Quick mode: Bo%d series, short delays", best_of)
+
+    resume = resume or {}
 
     state = ShowdownState()
     state.bot_a = {
@@ -379,15 +385,42 @@ async def run_showdown(bot_a: BotInfo, bot_b: BotInfo, port: int, quick: bool = 
 
     try:
         # ── Opening screen ───────────────────────────────────────────
-        state.phase = "idle"
-        state.bump()
-        await _sleep(t_opening, stop)
+        if not skip_opening and not resume:
+            state.phase = "idle"
+            state.countdown_end = time.time() + t_opening
+            state.bump()
+            await _sleep(t_opening, stop)
 
         for mode, team_size in SERIES_MODES:
             if stop.is_set():
                 break
 
             series = SeriesState(mode=mode, team_size=team_size, in_progress=True, best_of=best_of)
+
+            # Apply resume scores if provided
+            if mode in resume:
+                ra, rb = resume[mode]
+                series.wins_a = ra
+                series.wins_b = rb
+                series.current_game = ra + rb
+                logger.info("Resuming %s at %d-%d", mode, ra, rb)
+                # If this series is already decided, mark it and skip
+                if ra >= series.wins_needed:
+                    series.series_winner = "a"
+                    state.overall_wins_a += 1
+                    series.in_progress = False
+                    state.series_states[mode] = asdict(series)
+                    state.current_series = mode
+                    logger.info("  %s already won by %s (%d-%d)", mode, bot_a.name, ra, rb)
+                    continue
+                elif rb >= series.wins_needed:
+                    series.series_winner = "b"
+                    state.overall_wins_b += 1
+                    series.in_progress = False
+                    state.series_states[mode] = asdict(series)
+                    state.current_series = mode
+                    logger.info("  %s already won by %s (%d-%d)", mode, bot_b.name, ra, rb)
+                    continue
 
             # ── Series intro ─────────────────────────────────────────
             state.current_series = mode
@@ -407,9 +440,9 @@ async def run_showdown(bot_a: BotInfo, bot_b: BotInfo, port: int, quick: bool = 
                     break
                 series.current_game = len(series.games) + 1
 
-                # Random side assignment per game
-                a_is_blue = random.random() < 0.5
-                state.a_is_blue = a_is_blue
+                # Bot A is always blue, bot B is always orange
+                a_is_blue = True
+                state.a_is_blue = True
 
                 # Pick map (avoid repeat)
                 candidates = [m for m in STANDARD_MAPS if m not in used_maps[-2:]] or STANDARD_MAPS
@@ -635,6 +668,13 @@ body {
     margin-top: 20px;
     text-align: center;
     line-height: 1.6;
+}
+.sd-countdown {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 32px;
+    color: var(--gold);
+    margin-top: 24px;
+    letter-spacing: 4px;
 }
 
 /* ── Series Intro ───────────────────────── */
@@ -878,6 +918,11 @@ window.renderState = function(state) {
 
     if (pg === "idle") {
         const el = document.getElementById("layer-idle");
+        // Countdown timer
+        let countdownHtml = "";
+        if (state.countdown_end > 0) {
+            countdownHtml = `<div id="sd-countdown" class="sd-countdown"></div>`;
+        }
         el.innerHTML = `
             <img class="sd-bot-logo" src="/static/rlgym.png" alt="" style="width:64px;height:64px;">
             <div class="sd-title">MASTER CHEF SHOWDOWN</div>
@@ -900,8 +945,11 @@ window.renderState = function(state) {
             <div class="sd-format">
                 Three best-of-7 series: <strong>1v1</strong>, then <strong>3v3</strong>, then <strong>2v2</strong><br>
                 First to win 2 series crowns their maker <span style="color:var(--gold);">Master Chef</span> 👨‍🍳
-            </div>`;
+            </div>
+            ${countdownHtml}`;
         _show(el);
+        // Start countdown ticker
+        if (state.countdown_end > 0) _startCountdown(state.countdown_end);
 
     } else if (pg === "series_intro") {
         const el = document.getElementById("layer-series_intro");
@@ -1058,6 +1106,25 @@ window.renderState = function(state) {
             <div class="sd-final-scores">${scoresHtml}</div>`;
         _show(el);
     }
+/* ── Utilities ─── */
+let _countdownInterval = null;
+function _startCountdown(endTimestamp) {
+    if (_countdownInterval) clearInterval(_countdownInterval);
+    function tick() {
+        const el = document.getElementById("sd-countdown");
+        if (!el) { clearInterval(_countdownInterval); return; }
+        const remaining = Math.max(0, Math.ceil(endTimestamp - Date.now() / 1000));
+        const m = Math.floor(remaining / 60);
+        const s = remaining % 60;
+        el.textContent = "Starting in " + m + ":" + String(s).padStart(2, "0");
+        if (remaining <= 0) {
+            el.textContent = "Starting...";
+            clearInterval(_countdownInterval);
+        }
+    }
+    tick();
+    _countdownInterval = setInterval(tick, 500);
+}
 };
 </script>
 </body>
@@ -1178,6 +1245,14 @@ def main():
                         help="Preview the overlay with mock data (no games launched)")
     parser.add_argument("--quick", action="store_true",
                         help="Dry-run: Bo1 series with short delays to verify the full flow")
+    parser.add_argument("--1v1", dest="score_1v1", metavar="A-B",
+                        help="Resume 1v1 series at this score (e.g. 3-2)")
+    parser.add_argument("--3v3", dest="score_3v3", metavar="A-B",
+                        help="Resume 3v3 series at this score (e.g. 4-1)")
+    parser.add_argument("--2v2", dest="score_2v2", metavar="A-B",
+                        help="Resume 2v2 series at this score (e.g. 0-0)")
+    parser.add_argument("--skip-opening", action="store_true",
+                        help="Skip the opening countdown screen")
     args = parser.parse_args()
 
     bot_a = BotInfo.from_toml(Path(args.bot_a)) if args.bot_a else None
@@ -1189,8 +1264,21 @@ def main():
     else:
         if not bot_a or not bot_b:
             parser.error("bot_a and bot_b are required (unless using --preview)")
+
+        # Parse resume scores
+        resume: dict[str, tuple[int, int]] = {}
+        for mode_key, attr in [("1v1", "score_1v1"), ("3v3", "score_3v3"), ("2v2", "score_2v2")]:
+            val = getattr(args, attr)
+            if val:
+                try:
+                    a_w, b_w = val.split("-")
+                    resume[mode_key] = (int(a_w), int(b_w))
+                except ValueError:
+                    parser.error(f"Invalid score format for --{mode_key}: '{val}' (expected A-B, e.g. 3-2)")
+
         logger.info("Master Chef Showdown: %s vs %s", bot_a.name, bot_b.name)
-        asyncio.run(run_showdown(bot_a, bot_b, args.overlay_port, quick=args.quick))
+        asyncio.run(run_showdown(bot_a, bot_b, args.overlay_port, quick=args.quick,
+                                 resume=resume, skip_opening=args.skip_opening))
 
 
 if __name__ == "__main__":
