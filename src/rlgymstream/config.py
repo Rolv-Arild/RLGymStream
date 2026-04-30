@@ -83,7 +83,8 @@ class AppConfig:
     mode_rotation: list[MatchMode] = field(
         default_factory=lambda: list(MatchMode)
     )
-    post_match_delay: float = 15.0  # seconds to show in-game scoreboard
+    post_match_delay: float = 15.0  # seconds to show full-screen scoreboard
+    celebration_delay: float = 5.0  # seconds to wait for in-game celebration before showing scoreboard
     pre_match_delay: float = 15.0   # seconds to show pre-match screen
     leaderboard_delay: float = 15.0 # seconds to show leaderboard between matches
     sigma_priority_chance: float = 0.1  # chance to force highest-sigma bot into a match
@@ -97,6 +98,8 @@ class AppConfig:
     twitch_client_secret: str = ""  # Twitch application client secret
     twitch_bot_id: str = ""       # Twitch user ID of the bot account
     twitch_owner_id: str = ""     # Twitch user ID of the channel owner
+    stats_api_port: int = 49123           # Psyonix Stats API websocket port
+    stats_api_rate: int = 120              # recommended PacketSendRate in DefaultStatsAPI.ini (max 120)
 
     def get_default_mu(self, mode: str) -> float:
         """Return the starting mu for a mode, falling back to 25.0."""
@@ -161,6 +164,8 @@ class AppConfig:
                 cfg.overlay_port = int(data["overlay_port"])
             if "post_match_delay" in data:
                 cfg.post_match_delay = float(data["post_match_delay"])
+            if "celebration_delay" in data:
+                cfg.celebration_delay = float(data["celebration_delay"])
             if "pre_match_delay" in data:
                 cfg.pre_match_delay = float(data["pre_match_delay"])
             if "leaderboard_delay" in data:
@@ -173,6 +178,10 @@ class AppConfig:
                 cfg.matchmaker_n_prior = float(data["matchmaker_n_prior"])
             if "matchmaker_temperature" in data:
                 cfg.matchmaker_temperature = float(data["matchmaker_temperature"])
+            if "stats_api_port" in data:
+                cfg.stats_api_port = int(data["stats_api_port"])
+            if "stats_api_rate" in data:
+                cfg.stats_api_rate = int(data["stats_api_rate"])
             if "default_mu" in data:
                 val = data["default_mu"]
                 if isinstance(val, dict):

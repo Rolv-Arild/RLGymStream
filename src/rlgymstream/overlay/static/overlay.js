@@ -4,14 +4,18 @@
  * All overlay pages source this script.  It opens an EventSource
  * to /api/events and dispatches the latest state to page-specific
  * render functions that are expected to exist on each page.
+ *
+ * A second EventSource connects to /api/live_events for high-frequency
+ * Stats API data (boost, speed, stats, event ticker).
  */
 
 (function () {
     "use strict";
 
     let currentState = null;
+    let currentLiveStats = null;
 
-    function connect() {
+    function connectState() {
         const evtSource = new EventSource("/api/events");
 
         evtSource.addEventListener("state", function (e) {
@@ -28,11 +32,32 @@
         evtSource.onerror = function () {
             console.warn("SSE connection lost, reconnecting in 3s…");
             evtSource.close();
-            setTimeout(connect, 3000);
+            setTimeout(connectState, 3000);
         };
     }
 
-    // Also do an initial fetch so we have data immediately
+    function connectLiveStats() {
+        const evtSource = new EventSource("/api/live_events");
+
+        evtSource.addEventListener("live_stats", function (e) {
+            try {
+                currentLiveStats = JSON.parse(e.data);
+                if (typeof window.renderLiveStats === "function") {
+                    window.renderLiveStats(currentLiveStats);
+                }
+            } catch (err) {
+                console.error("Failed to parse live stats:", err);
+            }
+        });
+
+        evtSource.onerror = function () {
+            console.warn("Live stats SSE lost, reconnecting in 3s…");
+            evtSource.close();
+            setTimeout(connectLiveStats, 3000);
+        };
+    }
+
+    // Initial fetch for state
     fetch("/api/state")
         .then(r => r.json())
         .then(state => {
@@ -43,10 +68,12 @@
         })
         .catch(err => console.error("Initial fetch failed:", err));
 
-    connect();
+    connectState();
+    connectLiveStats();
 
     // Expose for debugging
     window.getOverlayState = function () { return currentState; };
+    window.getLiveStats = function () { return currentLiveStats; };
 })();
 
 /* ── Helper utilities ──────────────────────────────────────── */
@@ -72,3 +99,24 @@ function rankClass(rank) {
     return "";
 }
 
+/**
+ * Convert Stats API speed to display km/h.
+ * The Speed field is already in km/h — just round it.
+ */
+function uuToKmh(speed) {
+    return Math.round(speed);
+}
+
+/**
+ * Format match clock seconds into M:SS.
+ */
+function formatClock(seconds, isOvertime) {
+    if (isOvertime) {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `+${m}:${String(s).padStart(2, "0")}`;
+    }
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${String(s).padStart(2, "0")}`;
+}

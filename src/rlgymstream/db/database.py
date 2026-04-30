@@ -7,7 +7,7 @@ from pathlib import Path
 from contextlib import contextmanager
 from typing import Generator
 
-from rlgymstream.db.models import Bot, Rating, Match
+from rlgymstream.db.models import Bot, Rating, Match, MatchPlayerStats
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS bots (
@@ -44,6 +44,30 @@ CREATE TABLE IF NOT EXISTS matches (
     score_orange INTEGER NOT NULL DEFAULT 0,
     winner TEXT NOT NULL DEFAULT '',
     duration_seconds REAL NOT NULL DEFAULT 0.0
+);
+
+CREATE TABLE IF NOT EXISTS match_player_stats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id INTEGER NOT NULL,
+    bot_id INTEGER,
+    player_name TEXT NOT NULL DEFAULT '',
+    team_num INTEGER NOT NULL DEFAULT 0,
+    score INTEGER NOT NULL DEFAULT 0,
+    goals INTEGER NOT NULL DEFAULT 0,
+    shots INTEGER NOT NULL DEFAULT 0,
+    assists INTEGER NOT NULL DEFAULT 0,
+    saves INTEGER NOT NULL DEFAULT 0,
+    demos INTEGER NOT NULL DEFAULT 0,
+    touches INTEGER NOT NULL DEFAULT 0,
+    avg_boost REAL NOT NULL DEFAULT 0.0,
+    avg_speed REAL NOT NULL DEFAULT 0.0,
+    pct_supersonic REAL NOT NULL DEFAULT 0.0,
+    pct_ground REAL NOT NULL DEFAULT 0.0,
+    pct_wall REAL NOT NULL DEFAULT 0.0,
+    pct_air REAL NOT NULL DEFAULT 0.0,
+    pct_demolished REAL NOT NULL DEFAULT 0.0,
+    FOREIGN KEY (match_id) REFERENCES matches(id),
+    FOREIGN KEY (bot_id) REFERENCES bots(id)
 );
 """
 
@@ -251,6 +275,97 @@ class Database:
 
         return {k: (v[0], v[1]) for k, v in h2h.items()}
 
+    # ── Match Player Stats ────────────────────────────────────────────
+
+    def save_match_player_stats(self, stats: list[MatchPlayerStats]) -> None:
+        """Persist post-game per-player stats for a match."""
+        if not stats:
+            return
+        with self._conn() as conn:
+            conn.executemany(
+                """INSERT INTO match_player_stats
+                   (match_id, bot_id, player_name, team_num,
+                    score, goals, shots, assists, saves, demos, touches,
+                    avg_boost, avg_speed, pct_supersonic, pct_ground,
+                    pct_wall, pct_air, pct_demolished)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                [
+                    (s.match_id, s.bot_id, s.player_name, s.team_num,
+                     s.score, s.goals, s.shots, s.assists, s.saves,
+                     s.demos, s.touches, s.avg_boost, s.avg_speed,
+                     s.pct_supersonic, s.pct_ground, s.pct_wall,
+                     s.pct_air, s.pct_demolished)
+                    for s in stats
+                ],
+            )
+
+    def get_match_player_stats(self, match_id: int) -> list[MatchPlayerStats]:
+        """Return all player stats rows for a given match."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM match_player_stats WHERE match_id=? ORDER BY team_num, id",
+                (match_id,),
+            ).fetchall()
+            return [_row_to_match_player_stats(r) for r in rows]
+
+    def get_bot_avg_stats(self, bot_id: int, mode: str | None = None,
+                          limit: int | None = None) -> dict | None:
+        """Return averaged post-game stats for a bot across recent matches.
+
+        Returns None if no stats exist.
+        """
+        with self._conn() as conn:
+            q = """
+                SELECT
+                    COUNT(*) as n,
+                    AVG(mps.score) as avg_score,
+                    AVG(mps.goals) as avg_goals,
+                    AVG(mps.shots) as avg_shots,
+                    AVG(mps.assists) as avg_assists,
+                    AVG(mps.saves) as avg_saves,
+                    AVG(mps.demos) as avg_demos,
+                    AVG(mps.touches) as avg_touches,
+                    AVG(mps.avg_boost) as avg_boost,
+                    AVG(mps.avg_speed) as avg_speed,
+                    AVG(mps.pct_supersonic) as avg_pct_supersonic,
+                    AVG(mps.pct_ground) as avg_pct_ground,
+                    AVG(mps.pct_wall) as avg_pct_wall,
+                    AVG(mps.pct_air) as avg_pct_air
+                FROM match_player_stats mps
+                JOIN matches m ON mps.match_id = m.id
+                WHERE mps.bot_id = ?
+            """
+            params: list = [bot_id]
+            if mode:
+                q += " AND m.mode = ?"
+                params.append(mode)
+            if limit:
+                # Average over only the N most recent matches
+                q = q.replace(
+                    "FROM match_player_stats mps",
+                    "FROM (SELECT * FROM match_player_stats WHERE bot_id = ? ORDER BY match_id DESC LIMIT ?) mps",
+                )
+                params = [bot_id, limit] + params[1:]  # bot_id + limit first, then mode
+            row = conn.execute(q, params).fetchone()
+            if not row or row["n"] == 0:
+                return None
+            return {
+                "matches": row["n"],
+                "avg_score": round(row["avg_score"], 1),
+                "avg_goals": round(row["avg_goals"], 2),
+                "avg_shots": round(row["avg_shots"], 2),
+                "avg_assists": round(row["avg_assists"], 2),
+                "avg_saves": round(row["avg_saves"], 2),
+                "avg_demos": round(row["avg_demos"], 2),
+                "avg_touches": round(row["avg_touches"], 1),
+                "avg_boost": round(row["avg_boost"], 1),
+                "avg_speed": round(row["avg_speed"], 1),
+                "pct_supersonic": round(row["avg_pct_supersonic"], 1),
+                "pct_ground": round(row["avg_pct_ground"], 1),
+                "pct_wall": round(row["avg_pct_wall"], 1),
+                "pct_air": round(row["avg_pct_air"], 1),
+            }
+
     def get_head_to_head(self, bot_a_id: int, bot_b_id: int,
                          mode: str | None = None) -> dict:
 
@@ -349,5 +464,20 @@ def _row_to_match(row: sqlite3.Row) -> Match:
         team_orange_ids=row["team_orange_ids"],
         score_blue=row["score_blue"], score_orange=row["score_orange"],
         winner=row["winner"], duration_seconds=row["duration_seconds"],
+    )
+
+
+def _row_to_match_player_stats(row: sqlite3.Row) -> MatchPlayerStats:
+    return MatchPlayerStats(
+        id=row["id"], match_id=row["match_id"],
+        bot_id=row["bot_id"], player_name=row["player_name"],
+        team_num=row["team_num"], score=row["score"],
+        goals=row["goals"], shots=row["shots"],
+        assists=row["assists"], saves=row["saves"],
+        demos=row["demos"], touches=row["touches"],
+        avg_boost=row["avg_boost"], avg_speed=row["avg_speed"],
+        pct_supersonic=row["pct_supersonic"], pct_ground=row["pct_ground"],
+        pct_wall=row["pct_wall"], pct_air=row["pct_air"],
+        pct_demolished=row["pct_demolished"],
     )
 

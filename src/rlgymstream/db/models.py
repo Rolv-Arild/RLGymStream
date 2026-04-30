@@ -63,3 +63,26 @@ class Match:
     winner: str = ""          # "blue", "orange", or "draw"
     duration_seconds: float = 0.0
 
+
+@dataclass
+class MatchPlayerStats:
+    """Post-game stats for a single player in a match, from the Stats API."""
+    id: int | None = None
+    match_id: int = 0
+    bot_id: int | None = None       # FK → bots (None if we can't map the name)
+    player_name: str = ""           # name as reported by the Stats API
+    team_num: int = 0               # 0 = Blue, 1 = Orange
+    score: int = 0
+    goals: int = 0
+    shots: int = 0
+    assists: int = 0
+    saves: int = 0
+    demos: int = 0
+    touches: int = 0
+    avg_boost: float = 0.0
+    avg_speed: float = 0.0
+    pct_supersonic: float = 0.0
+    pct_ground: float = 0.0
+    pct_wall: float = 0.0
+    pct_air: float = 0.0
+    pct_demolished: float = 0.0

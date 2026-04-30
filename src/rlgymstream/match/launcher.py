@@ -114,6 +114,8 @@ class MatchLauncher:
                         flat.MatchPhase.Active,
                     ):
                         try:
+                            # Send twice to get clean feed. We use our own overlay
+                            manager.set_game_state(commands=["CycleHUD"])
                             manager.set_game_state(commands=["CycleHUD"])
                             logger.info("Sent CycleHUD")
                         except Exception:
@@ -232,7 +234,7 @@ class MatchLauncher:
         game_map_upk = GAME_MAP_TO_UPK.get(setup.map_name, setup.map_name)
 
         return flat.MatchConfiguration(
-            launcher=flat.Launcher.Epic,
+            launcher=flat.Launcher.Steam,  # FIXME use Epic
             player_configurations=players,
             game_map_upk=game_map_upk,
             game_mode=flat.GameMode.Soccar,

@@ -4,6 +4,7 @@
 
 overlay_port = 8080
 post_match_delay = 15
+celebration_delay = 5
 pre_match_delay = 15
 leaderboard_delay = 15
 sigma_priority_chance = 0.1   # chance to force the most uncertain bot into a match (0.0–1.0)
@@ -88,4 +89,15 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 # client_secret = ""         # from Twitch Developer Console
 # bot_id = ""                # optional: numeric user ID of bot account (defaults to channel)
 # owner_id = ""              # optional: numeric user ID of channel owner (defaults to channel)
+
+# ── Psyonix Stats API ───────────────────────────────────────────────
+# The Stats API broadcasts live game data over a local websocket.
+# To enable it, edit <RL Install Dir>\TAGame\Config\DefaultStatsAPI.ini:
+#   PacketSendRate=10     (number of UpdateState packets per second, max 120)
+#   Port=49123            (websocket port)
+# Then restart Rocket League. The overlay will show live boost bars,
+# speed indicators, stat counters, event ticker, and postgame analytics.
+
+# stats_api_port = 49123   # must match the Port in DefaultStatsAPI.ini
+# stats_api_rate = 120      # recommended PacketSendRate in DefaultStatsAPI.ini (max 120)
 

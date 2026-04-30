@@ -8,6 +8,8 @@ import threading
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
+from rlgymstream.stats_api.models import LiveMatchStats
+
 
 @dataclass
 class OverlayBotInfo:
@@ -41,6 +43,7 @@ class OverlayMatchState:
     match_number: int = 0
     win_probabilities: list[float] = field(default_factory=list)  # [p_blue, p_orange]
     mmr_deltas: dict[int, int] = field(default_factory=dict)  # bot_id → MMR change
+    post_match_stats: dict | None = field(default=None)
     updated_at: float = field(default_factory=time.time)
 
 
@@ -68,12 +71,19 @@ class OverlayState:
     head_to_head: dict[str, Any] = field(default_factory=dict)
     total_matches: int = 0
     session_matches: int = 0
+    live_stats: LiveMatchStats | None = field(default=None, repr=False)
+    post_match_stats: dict | None = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _version: int = 0
+    _live_version: int = 0
 
     @property
     def version(self) -> int:
         return self._version
+
+    @property
+    def live_version(self) -> int:
+        return self._live_version
 
     def update_match(self, match_state: OverlayMatchState) -> None:
         with self._lock:
@@ -101,6 +111,26 @@ class OverlayState:
             self.session_matches += 1
             self._version += 1
 
+    def update_live_stats(self, stats: LiveMatchStats) -> None:
+        """Update live stats (high-frequency, separate version counter)."""
+        with self._lock:
+            self.live_stats = stats
+            self._live_version += 1
+
+    def set_post_match_stats(self, stats: dict | None) -> None:
+        with self._lock:
+            self.post_match_stats = stats
+            self._version += 1
+
+    def live_stats_to_json(self) -> str:
+        """Compact JSON of just the live stats (for high-frequency SSE)."""
+        with self._lock:
+            if self.live_stats:
+                data = self.live_stats.to_dict()
+            else:
+                data = {}
+            return json.dumps(data)
+
     def to_json(self) -> str:
         with self._lock:
             data = {
@@ -113,6 +143,7 @@ class OverlayState:
                 "head_to_head": self.head_to_head,
                 "total_matches": self.total_matches,
                 "session_matches": self.session_matches,
+                "post_match_stats": self.post_match_stats,
                 "version": self._version,
             }
             return json.dumps(data)

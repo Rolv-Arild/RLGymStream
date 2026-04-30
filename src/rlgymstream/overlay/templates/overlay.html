@@ -3,32 +3,468 @@
 <head>
     <meta charset="UTF-8">
     <title>RLGymStream</title>
-    <link rel="stylesheet" href="/static/styles.css?v=4">
+    <link rel="stylesheet" href="/static/styles.css?v=5">
     <style>
         /* Badge cards for live in-game display */
         .badge-card {
             background: rgba(12, 6, 22, 0.8);
             border-radius: 10px;
-            padding: 12px 20px;
-            min-width: 140px;
+            padding: 10px 16px;
+            min-width: 180px;
+            position: relative;
         }
         .badge-card.blue   { border-left: 3px solid #3b82f6; }
         .badge-card.orange { border-right: 3px solid #f97316; text-align: right; }
-        .badge-name { font-size: 20px; font-weight: 600; color: #f0f0f0; font-family: 'Poppins', sans-serif; }
-        .badge-mmr { font-family: 'Orbitron', sans-serif; font-size: 28px; color: #fbbf24; line-height: 1; }
+        .spectate-eye {
+            position: absolute;
+            top: 4px;
+            font-size: 11px;
+            opacity: 0.7;
+            pointer-events: none;
+        }
+        .badge-card.blue .spectate-eye   { right: 6px; }
+        .badge-card.orange .spectate-eye  { left: 6px; }
+        .badge-name { font-size: 18px; font-weight: 600; color: #f0f0f0; font-family: 'Poppins', sans-serif; }
+        .badge-mmr { font-family: 'Orbitron', sans-serif; font-size: 24px; color: #fbbf24; line-height: 1; }
         .badge-mmr-label { font-size: 10px; color: #b8a8c8; letter-spacing: 1px; text-transform: uppercase; margin-top: 2px; }
         .badge-count { font-size: 14px; color: #b8a8c8; font-weight: 400; }
-        .badge-delta-pos { font-size: 16px; color: #4ade80; font-weight: 600; margin-left: 6px; }
-        .badge-delta-neg { font-size: 16px; color: #f87171; font-weight: 600; margin-left: 6px; }
+        .badge-delta-pos { font-size: 14px; color: #4ade80; font-weight: 600; margin-left: 4px; }
+        .badge-delta-neg { font-size: 14px; color: #f87171; font-weight: 600; margin-left: 4px; }
         .anchored-icon { font-size: 0.65em; color: #94a3b8; margin-left: 4px; vertical-align: middle; cursor: default; }
+
+        /* ── Boost bar ── */
+        .boost-bar-container {
+            height: 6px;
+            background: rgba(255,255,255,0.08);
+            border-radius: 3px;
+            margin-top: 6px;
+            overflow: hidden;
+        }
+        .boost-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.05s linear, background-color 0.3s ease;
+            background: linear-gradient(90deg, #f97316, #fbbf24);
+        }
+        .boost-bar-fill.low  { background: linear-gradient(90deg, #ef4444, #f97316); }
+        .boost-bar-fill.full { background: linear-gradient(90deg, #fbbf24, #facc15); box-shadow: 0 0 8px rgba(251,191,36,0.5); }
+
+        /* ── Speed & supersonic ── */
+        .badge-speed { font-family: 'Orbitron', sans-serif; font-size: 12px; color: #b8a8c8; margin-top: 3px; }
+        .badge-speed.supersonic { color: #38bdf8; text-shadow: 0 0 8px rgba(56,189,248,0.6); }
+
+        /* ── Demolished overlay ── */
+        .badge-card.demolished { opacity: 0.4; }
+        .badge-demolished-label { font-size: 11px; color: #f87171; font-weight: 600; margin-top: 2px; letter-spacing: 1px; }
+
+        /* ── Live stat counters ── */
+        .badge-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 0;
+            margin-top: 6px;
+            font-size: 10px;
+            text-align: center;
+        }
+        .badge-stats-grid .stat-hdr {
+            color: #6b7280;
+            font-size: 11px;
+            line-height: 1;
+            padding-bottom: 1px;
+        }
+        .badge-stats-grid .stat-val {
+            color: #d1d5db;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 11px;
+            line-height: 1.2;
+        }
+
+        /* ── Scoreboard (top center) ── */
+        .scoreboard-wrapper {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+        }
+        .sb-mode-label {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 11px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: #a855f7;
+            background: rgba(12, 6, 22, 0.88);
+            border-radius: 6px;
+            padding: 3px 14px;
+            border: 1px solid rgba(168, 85, 247, 0.3);
+        }
+        .top-bar {
+            display: flex;
+            align-items: center;
+            background: rgba(12, 6, 22, 0.88);
+            border-radius: 12px;
+            padding: 0;
+            font-family: 'Orbitron', sans-serif;
+            overflow: hidden;
+        }
+        .sb-team {
+            display: flex;
+            align-items: center;
+            padding: 12px 28px;
+            min-width: 90px;
+            justify-content: center;
+        }
+        .sb-team.blue  { background: rgba(59, 130, 246, 0.25); }
+        .sb-team.orange { background: rgba(249, 115, 22, 0.25); }
+        .sb-score {
+            font-size: 42px;
+            font-weight: 700;
+            color: #f0f0f0;
+            line-height: 1;
+        }
+        .sb-team.blue .sb-score  { color: #60a5fa; }
+        .sb-team.orange .sb-score { color: #fb923c; }
+        .sb-center {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px 24px;
+            min-width: 100px;
+        }
+        .sb-clock { font-size: 28px; color: #f0f0f0; }
+        .sb-clock.overtime { color: #f87171; }
+        .sb-ot-label { font-size: 11px; color: #f87171; letter-spacing: 2px; margin-top: 2px; }
+
+        /* ── Bottom-left info (ball speed + event ticker) ── */
+        .bottom-left-info {
+            position: absolute;
+            bottom: 16px;
+            left: 16px;
+            z-index: 20;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
+            max-width: 500px;
+            pointer-events: none;
+        }
+        .ball-speed-indicator {
+            background: rgba(12, 6, 22, 0.7);
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .ball-speed-indicator .ball-speed-val { color: #94a3b8; font-size: 14px; }
+
+        /* ── Event ticker (inside bottom-left) ── */
+        .event-ticker {
+            display: flex;
+            flex-direction: column-reverse;
+            gap: 4px;
+            max-height: 120px;
+            overflow: hidden;
+            pointer-events: none;
+        }
+        .ticker-event {
+            background: rgba(12, 6, 22, 0.85);
+            border-radius: 6px;
+            padding: 4px 12px;
+            font-size: 13px;
+            color: #f0f0f0;
+            animation: tickerSlideIn 0.3s ease-out, tickerFadeOut 0.5s ease 5s forwards;
+            white-space: nowrap;
+            text-align: left;
+        }
+        .ticker-event.team-blue { border-left: 2px solid #3b82f6; }
+        .ticker-event.team-orange { border-left: 2px solid #f97316; }
+        .ticker-event .ticker-name { font-weight: 600; }
+        .ticker-event .ticker-detail { color: #b8a8c8; font-size: 11px; margin-left: 6px; }
+        .ticker-event.goal { background: rgba(12, 6, 22, 0.92); border-left-width: 3px; }
+        .ticker-event.goal .ticker-name { color: #fbbf24; }
+
+        @keyframes tickerSlideIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes tickerFadeOut {
+            from { opacity: 1; }
+            to   { opacity: 0; }
+        }
+
+        /* ── Boost arc (bottom-right, spectated player) ── */
+        .boost-arc-container {
+            position: absolute;
+            bottom: 0;
+            right: 16px;
+            z-index: 20;
+            width: 220px;
+            height: 140px;
+            pointer-events: none;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+        }
+        .boost-arc-svg {
+            width: 200px;
+            height: 125px;
+        }
+        .boost-arc-backing {
+            fill: rgba(12, 6, 22, 0.82);
+        }
+        .boost-arc-bg {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.08);
+            stroke-width: 12;
+            stroke-linecap: round;
+        }
+        .boost-arc-fill {
+            fill: none;
+            stroke-width: 12;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.05s linear, stroke 0.3s ease;
+        }
+        .boost-arc-text {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 32px;
+            fill: #f0f0f0;
+            text-anchor: middle;
+            dominant-baseline: alphabetic;
+        }
+        .boost-arc-label {
+            font-family: 'Poppins', sans-serif;
+            font-size: 11px;
+            fill: #6b7280;
+            text-anchor: middle;
+            dominant-baseline: hanging;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        /* ── Current player indicator (bottom-center) ── */
+        .current-player-box {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            background: rgba(12, 6, 22, 0.85);
+            border-radius: 8px;
+            padding: 5px 20px;
+            font-family: 'Poppins', sans-serif;
+            font-size: 14px;
+            color: #b8a8c8;
+            text-align: center;
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        .current-player-box .player-name { font-weight: 600; }
+
+        /* ── Postgame advanced stats ── */
+        .postgame-stats {
+            position: absolute;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 1100px;
+            background: rgba(12, 6, 22, 0.92);
+            border-radius: 10px;
+            padding: 16px 24px;
+            z-index: 20;
+            border-top: 2px solid #7b2ff2;
+        }
+        .postgame-stats-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 14px;
+            color: #a855f7;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .postgame-stats-table {
+            width: 100%;
+            font-size: 14px;
+            color: #f0f0f0;
+            border-collapse: collapse;
+        }
+        .postgame-stats-table th {
+            font-size: 11px;
+            color: #b8a8c8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 4px 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .postgame-stats-table td {
+            padding: 5px 8px;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .postgame-stats-table .player-name {
+            text-align: left;
+            font-weight: 600;
+        }
+        .postgame-stats-table .team-blue td.player-name { color: #3b82f6; }
+        .postgame-stats-table .team-orange td.player-name { color: #f97316; }
+        .postgame-stats-table .team-divider td { border-top: 1px solid rgba(255,255,255,0.1); }
+
+        /* ── Full-screen scoreboard ── */
+        .fs-scoreboard {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(ellipse at 50% 40%, rgb(30, 15, 50) 0%, rgb(8, 4, 16) 100%);
+            padding: 40px;
+            gap: 20px;
+        }
+        .fs-sb-header {
+            display: flex;
+            align-items: center;
+            gap: 32px;
+            margin-bottom: 8px;
+        }
+        .fs-sb-logo { width: 48px; height: 48px; opacity: 0.7; }
+        .fs-sb-mode {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 12px;
+            color: #a855f7;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            background: rgba(168, 85, 247, 0.1);
+            border: 1px solid rgba(168, 85, 247, 0.3);
+            border-radius: 6px;
+            padding: 3px 14px;
+        }
+        .fs-sb-match-num {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 11px;
+            color: #6b7280;
+            letter-spacing: 2px;
+        }
+
+        /* Score banner */
+        .fs-sb-score-banner {
+            display: flex;
+            align-items: center;
+            gap: 0;
+            background: rgba(12, 6, 22, 0.6);
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        .fs-sb-team-score {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px 40px;
+            min-width: 180px;
+        }
+        .fs-sb-team-score.blue  { background: rgba(59, 130, 246, 0.15); }
+        .fs-sb-team-score.orange { background: rgba(249, 115, 22, 0.15); }
+        .fs-sb-team-score .score-num {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 64px;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .fs-sb-team-score.blue .score-num  { color: #60a5fa; }
+        .fs-sb-team-score.orange .score-num { color: #fb923c; }
+        .fs-sb-team-name {
+            font-family: 'Poppins', sans-serif;
+            font-size: 14px;
+            color: #d1d5db;
+            margin-top: 4px;
+        }
+        .fs-sb-center-divider {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 12px 24px;
+        }
+        .fs-sb-result {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 14px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+        }
+        .fs-sb-result.blue-win  { color: #60a5fa; }
+        .fs-sb-result.orange-win { color: #fb923c; }
+        .fs-sb-result.draw { color: #6b7280; }
+        .fs-sb-map {
+            font-size: 11px;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+
+        /* MMR deltas row */
+        .fs-sb-mmr-row {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            flex-wrap: wrap;
+        }
+        .fs-sb-mmr-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-family: 'Poppins', sans-serif;
+            font-size: 13px;
+            color: #d1d5db;
+        }
+        .fs-sb-mmr-item .delta-pos { color: #4ade80; font-weight: 600; }
+        .fs-sb-mmr-item .delta-neg { color: #f87171; font-weight: 600; }
+
+        /* Stats table */
+        .fs-sb-stats-table {
+            width: 94%;
+            max-width: 1100px;
+            border-collapse: collapse;
+            font-size: 16px;
+            color: #f0f0f0;
+        }
+        .fs-sb-stats-table th {
+            font-size: 13px;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 8px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .fs-sb-stats-table td {
+            padding: 10px 12px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            white-space: nowrap;
+        }
+        .fs-sb-stats-table td.pname {
+            text-align: left;
+            font-weight: 600;
+            font-size: 17px;
+        }
+        .fs-sb-stats-table tr.team-blue td.pname { color: #60a5fa; }
+        .fs-sb-stats-table tr.team-orange td.pname { color: #fb923c; }
+        .fs-sb-stats-table tr.team-sep td {
+            border-top: 2px solid rgba(255,255,255,0.08);
+            padding: 0;
+            height: 8px;
+        }
+        .fs-sb-stats-table .stat-highlight { color: #fbbf24; font-weight: 600; }
     </style>
 </head>
 <body>
 <!--
   Single 1920×1080 OBS Browser Source overlay.
   - pregame:  full-screen bot showcase (descriptions, fun facts, MMR, H2H, win probability)
-  - live:     minimal badges in top-left/top-right (avoids game UI)
-  - postgame: badges with MMR gain/loss deltas (game shows its own scoreboard)
+  - live:     scoreboard (top center), badges with boost/speed/stats, ticker+ball speed (bottom-left), boost arc (bottom-right)
+  - postgame: badges with MMR gain/loss deltas + advanced stats panel
   - idle:     leaderboard between matches
 -->
 <div id="overlay">
@@ -36,29 +472,80 @@
     <div id="pregame" class="phase-layer" style="display:none"></div>
 
     <!-- live: blue bots stacked on left, orange bots stacked on right -->
-    <div id="live-blue" style="display:none; position:absolute; top:16px; left:16px; flex-direction:column; gap:8px; z-index:10;"></div>
-    <div id="live-orange" style="display:none; position:absolute; top:16px; right:16px; flex-direction:column; gap:8px; z-index:10;"></div>
+    <div id="live-blue" style="display:none; position:absolute; top:56px; left:16px; flex-direction:column; gap:8px; z-index:10;"></div>
+    <div id="live-orange" style="display:none; position:absolute; top:56px; right:16px; flex-direction:column; gap:8px; z-index:10;"></div>
+
+    <!-- live: scoreboard (top center) with mode label above -->
+    <div id="live-top-bar" class="scoreboard-wrapper" style="display:none;">
+        <div id="sb-scoreboard" class="top-bar"></div>
+        <div id="sb-mode-label" class="sb-mode-label"></div>
+    </div>
+
+    <!-- live: bottom-left (event ticker + ball speed) -->
+    <div id="live-bottom-left" class="bottom-left-info" style="display:none;">
+        <div id="live-ticker" class="event-ticker"></div>
+        <div id="live-ball-speed" class="ball-speed-indicator"></div>
+    </div>
+
+    <!-- live: boost arc (bottom-right, spectated player) -->
+    <div id="live-boost-arc" class="boost-arc-container" style="display:none;">
+        <svg class="boost-arc-svg" viewBox="0 0 200 125" style="overflow:visible">
+            <!-- Backing: concentric semicircle, same center (100,112), radius 102 (arc 88 + half stroke 6 + padding 8) -->
+            <path class="boost-arc-backing"
+                  d="M -2,112 A 102,102 0 0,1 202,112 L 202,145 L -2,145 Z" />
+            <!-- Semicircle arc: center (100,112), radius 88, from 180° to 0° -->
+            <path class="boost-arc-bg"
+                  d="M 12,112 A 88,88 0 0,1 188,112" />
+            <path id="boost-arc-path" class="boost-arc-fill"
+                  d="M 12,112 A 88,88 0 0,1 188,112"
+                  stroke="#f97316"
+                  stroke-dasharray="276.5"
+                  stroke-dashoffset="276.5" />
+            <text id="boost-arc-number" class="boost-arc-text" x="100" y="98">0</text>
+            <text class="boost-arc-label" x="100" y="112">BOOST</text>
+        </svg>
+    </div>
+
+    <!-- live: current player indicator (bottom-center) -->
+    <div id="live-current-player" class="current-player-box" style="display:none;"></div>
+
+    <!-- postgame: advanced stats panel (shown during "postgame" phase on top of badges) -->
+    <div id="postgame-stats" class="postgame-stats" style="display:none;"></div>
+
+    <!-- scoreboard: full-screen post-match scoreboard -->
+    <div id="scoreboard" class="phase-layer" style="display:none"></div>
 
     <!-- idle: leaderboard display between matches -->
     <div id="idle-leaderboard" class="phase-layer" style="display:none"></div>
 </div>
 
-<script src="/static/overlay.js?v=3"></script>
+<script src="/static/overlay.js?v=5"></script>
 <script>
 let _currentPhase = null;
 const FADE_MS = 300;
 
 const _layers = {};
+// Child elements (not managed by the layer show/hide system)
+const _els = {};
 
 function _initLayers() {
     _layers.pregame    = document.getElementById("pregame");
     _layers.liveBlue   = document.getElementById("live-blue");
     _layers.liveOrange = document.getElementById("live-orange");
+    _layers.liveTopBar = document.getElementById("live-top-bar");
+    _layers.liveBottomLeft = document.getElementById("live-bottom-left");
+    _layers.liveBoostArc = document.getElementById("live-boost-arc");
+    _layers.liveCurrentPlayer = document.getElementById("live-current-player");
+    _layers.scoreboard = document.getElementById("scoreboard");
+    _layers.postgameStats = document.getElementById("postgame-stats");
     _layers.idle       = document.getElementById("idle-leaderboard");
     for (const el of Object.values(_layers)) {
         el.style.transition = `opacity ${FADE_MS}ms ease`;
         el.style.opacity = "0";
     }
+    // Child refs — NOT in the layer system
+    _els.liveTicker = document.getElementById("live-ticker");
+    _els.liveBallSpeed = document.getElementById("live-ball-speed");
 }
 
 function _showLayer(el, displayValue) {
@@ -72,18 +559,20 @@ function _hideLayer(el) {
     el.style.display = "none";
 }
 
-// Phase group key (countdown/live/replay/postgame all show badges)
+// Phase group key (countdown/live/replay/postgame all show badges; scoreboard is full-screen)
 function _phaseGroup(phase) {
     if (phase === "countdown" || phase === "live" || phase === "replay" || phase === "postgame") return "live";
+    if (phase === "scoreboard") return "scoreboard";
     return phase;
 }
 
 // Full-screen phases that must crossfade without showing background
-const _fullScreenPhases = new Set(["pregame", "idle"]);
+const _fullScreenPhases = new Set(["pregame", "idle", "scoreboard"]);
 
 function _getLayersForGroup(group) {
     if (group === "pregame") return [_layers.pregame];
-    if (group === "live")    return [_layers.liveBlue, _layers.liveOrange];
+    if (group === "live")    return [_layers.liveBlue, _layers.liveOrange, _layers.liveTopBar, _layers.liveBottomLeft, _layers.liveBoostArc, _layers.liveCurrentPlayer];
+    if (group === "scoreboard") return [_layers.scoreboard];
     if (group === "idle")    return [_layers.idle];
     return [];
 }
@@ -109,35 +598,31 @@ window.renderState = function(state) {
     const oldLayers = _getLayersForGroup(oldGroup);
     const newLayers = _getLayersForGroup(newGroup);
 
+    // Handle postgame stats panel visibility
+    _hideLayer(_layers.postgameStats);
+
     // If both old and new are full-screen, crossfade:
-    // show new underneath at full opacity, then fade old out on top.
     if (_fullScreenPhases.has(oldGroup) && _fullScreenPhases.has(newGroup)) {
-        // Show new layer immediately at full opacity (underneath via z-order)
         for (const el of newLayers) {
             el.style.transition = "none";
             el.style.display = "flex";
             el.style.opacity = "1";
             el.style.zIndex = "1";
         }
-        // Old layer stays visible on top, then fades out
         for (const el of oldLayers) {
             el.style.zIndex = "2";
             el.style.transition = `opacity ${FADE_MS}ms ease`;
         }
-        void document.body.offsetHeight; // force reflow
+        void document.body.offsetHeight;
         for (const el of oldLayers) {
             el.style.opacity = "0";
         }
         setTimeout(() => {
             for (const el of oldLayers) _hideLayer(el);
-            // Reset z-index
             for (const el of [...oldLayers, ...newLayers]) el.style.zIndex = "";
-            // Re-enable transition on new layers
             for (const el of newLayers) el.style.transition = `opacity ${FADE_MS}ms ease`;
         }, FADE_MS);
     } else {
-        // Non-full-screen transition (e.g. live→postgame, pregame→live)
-        // Fade out old, then show new
         let anyVisible = false;
         for (const el of oldLayers) {
             if (el.style.display !== "none" && el.style.opacity !== "0") {
@@ -145,6 +630,10 @@ window.renderState = function(state) {
                 el.style.opacity = "0";
                 anyVisible = true;
             }
+        }
+        // Also hide postgame stats when transitioning away from live
+        if (oldGroup === "live") {
+            _hideLayer(_layers.postgameStats);
         }
         const showNew = () => {
             for (const el of oldLayers) _hideLayer(el);
@@ -164,8 +653,226 @@ function _updateContent(m, state) {
         renderPregame(m, state, _layers.pregame);
     } else if (_phaseGroup(m.phase) === "live") {
         renderLiveBadges(m);
+        _layers.postgameStats.style.display = "none";
+        _layers.postgameStats.style.opacity = "0";
+    } else if (_phaseGroup(m.phase) === "scoreboard") {
+        _layers.postgameStats.style.display = "none";
+        _layers.postgameStats.style.opacity = "0";
+        renderScoreboard(m, state, _layers.scoreboard);
     } else if (_phaseGroup(m.phase) === "idle") {
         renderIdleLeaderboard(state, _layers.idle);
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   LIVE STATS — high-frequency updates from Stats API
+   ═══════════════════════════════════════════════════════════ */
+
+// Track which events we've already rendered in the ticker
+let _lastRenderedEventCount = 0;
+
+window.renderLiveStats = function(liveStats) {
+    if (!_layers.pregame) _initLayers();
+    if (_currentPhase !== "live") return;
+    if (!liveStats || !liveStats.players) return;
+
+    // Update boost bars, speed, demolished state, stat counters
+    _updateLivePlayerStats(liveStats.players, liveStats.game);
+
+    // Update top bar (scoreboard: scores + clock)
+    _updateTopBar(liveStats.game);
+
+    // Update bottom-left (ball speed)
+    _updateBallSpeed(liveStats.game);
+
+    // Update boost arc (spectated player)
+    _updateBoostArc(liveStats.game, liveStats.players);
+
+    // Update current player indicator (bottom-center)
+    _updateCurrentPlayer(liveStats.game);
+
+    // Update event ticker
+    _updateTicker(liveStats.events);
+};
+
+function _updateLivePlayerStats(players, game) {
+    const targetName = (game && game.has_target) ? game.target_name : "";
+    // For each badge card, find the matching player and update live elements
+    document.querySelectorAll(".badge-card[data-bot-name]").forEach(card => {
+        const name = card.dataset.botName;
+        const isSpectated = name === targetName;
+        // Eye emoji indicator
+        let eye = card.querySelector(".spectate-eye");
+        if (isSpectated && !eye) {
+            eye = document.createElement("span");
+            eye.className = "spectate-eye";
+            eye.textContent = "👁️";
+            card.appendChild(eye);
+        } else if (!isSpectated && eye) {
+            eye.remove();
+        }
+        const pStats = players[name];
+        if (!pStats) return;
+
+        // Boost bar
+        const boostFill = card.querySelector(".boost-bar-fill");
+        if (boostFill) {
+            boostFill.style.width = pStats.boost + "%";
+            boostFill.classList.toggle("low", pStats.boost < 20);
+            boostFill.classList.toggle("full", pStats.boost >= 100);
+        }
+
+        // Speed
+        const speedEl = card.querySelector(".badge-speed");
+        if (speedEl) {
+            const kmh = uuToKmh(pStats.speed);
+            speedEl.textContent = kmh + " kph";
+            speedEl.classList.toggle("supersonic", pStats.is_supersonic);
+        }
+
+        // Demolished state
+        card.classList.toggle("demolished", pStats.is_demolished);
+        const demoLabel = card.querySelector(".badge-demolished-label");
+        if (demoLabel) {
+            demoLabel.style.display = pStats.is_demolished ? "block" : "none";
+        }
+
+        // Stat counters
+        const statsGrid = card.querySelector(".badge-stats-grid");
+        if (statsGrid) {
+            const stats = {score: pStats.score, goals: pStats.goals, shots: pStats.shots, assists: pStats.assists, saves: pStats.saves, demos: pStats.demos, touches: pStats.touches};
+            for (const [key, val] of Object.entries(stats)) {
+                const el = statsGrid.querySelector(`[data-stat="${key}"]`);
+                if (el) el.textContent = val ?? 0;
+            }
+        }
+    });
+}
+
+function _updateTopBar(game) {
+    if (!game) return;
+    const bar = document.getElementById("sb-scoreboard");
+    const modeLabel = document.getElementById("sb-mode-label");
+    const isOT = game.is_overtime;
+    const clockClass = isOT ? "sb-clock overtime" : "sb-clock";
+    const otLabel = isOT ? '<div class="sb-ot-label">OVERTIME</div>' : "";
+
+    // Mode label above the scoreboard
+    if (modeLabel && _currentMatch) {
+        modeLabel.textContent = _currentMatch.mode_display || _currentMatch.mode || "";
+    }
+
+    bar.innerHTML = `
+        <div class="sb-team blue"><span class="sb-score">${game.score_blue ?? 0}</span></div>
+        <div class="sb-center">
+            <div class="${clockClass}">${formatClock(game.time_seconds, isOT)}</div>
+            ${otLabel}
+        </div>
+        <div class="sb-team orange"><span class="sb-score">${game.score_orange ?? 0}</span></div>
+    `;
+}
+
+function _updateBallSpeed(game) {
+    if (!game) return;
+    const el = _els.liveBallSpeed;
+    const kmh = uuToKmh(game.ball_speed);
+    el.innerHTML = `⚽ <span class="ball-speed-val">${kmh}</span> kph`;
+}
+
+// The arc path length for our semicircle (radius 88, from 180° to 0°) = π × 88 ≈ 276.5
+const _ARC_LENGTH = 276.5;
+
+function _updateBoostArc(game, players) {
+    if (!game || !players) return;
+
+    const container = _layers.liveBoostArc;
+    const arcPath = document.getElementById("boost-arc-path");
+    const arcNumber = document.getElementById("boost-arc-number");
+    if (!arcPath || !arcNumber) return;
+
+    // Hide entirely when not spectating anyone
+    if (!game.has_target || !game.target_name || !players[game.target_name]) {
+        container.style.opacity = "0";
+        return;
+    }
+    container.style.opacity = "1";
+
+    const p = players[game.target_name];
+    const boost = p.boost ?? 0;
+
+    // Update arc fill: stroke-dashoffset = arcLength × (1 - boost/100)
+    const fraction = Math.min(boost, 100) / 100;
+    arcPath.style.strokeDashoffset = _ARC_LENGTH * (1 - fraction);
+
+    // Color: orange gradient for normal, gold+glow for full
+    if (boost >= 100) {
+        arcPath.setAttribute("stroke", "#fbbf24");
+        arcPath.style.filter = "drop-shadow(0 0 6px rgba(251,191,36,0.6))";
+    } else if (boost < 20) {
+        arcPath.setAttribute("stroke", "#ef4444");
+        arcPath.style.filter = "none";
+    } else {
+        arcPath.setAttribute("stroke", "#f97316");
+        arcPath.style.filter = "none";
+    }
+
+    // Update number
+    arcNumber.textContent = boost;
+}
+
+function _updateCurrentPlayer(game) {
+    if (!game) return;
+    const el = _layers.liveCurrentPlayer;
+    if (!el) return;
+
+    if (game.has_target && game.target_name) {
+        const teamNum = game.target_team_num;
+        const color = teamNum === 0 ? "#60a5fa" : teamNum === 1 ? "#fb923c" : "#d1d5db";
+        el.innerHTML = `Spectating <span class="player-name" style="color:${color}">${escapeHtml(game.target_name)}</span>`;
+        el.style.display = "block";
+    } else {
+        el.style.display = "none";
+    }
+}
+
+function _updateTicker(events) {
+    if (!events || events.length === 0) return;
+    const ticker = _els.liveTicker;
+
+    // Only render new events
+    const newCount = events.length;
+    if (newCount <= _lastRenderedEventCount) return;
+
+    const newEvents = events.slice(_lastRenderedEventCount);
+    _lastRenderedEventCount = newCount;
+
+    for (const evt of newEvents) {
+        const div = document.createElement("div");
+        const teamClass = evt.team_num === 0 ? "team-blue" : evt.team_num === 1 ? "team-orange" : "";
+        const isGoal = evt.event_type === "goal";
+
+        div.className = `ticker-event ${teamClass} ${isGoal ? "goal" : ""}`;
+
+        if (isGoal) {
+            const speedKmh = evt.details?.goal_speed_kmh || 0;
+            const assist = evt.secondary ? ` <span class="ticker-detail">assisted by ${escapeHtml(evt.secondary)}</span>` : "";
+            div.innerHTML = `⚽ <span class="ticker-name">${escapeHtml(evt.primary)}</span> scored!${assist} <span class="ticker-detail">${speedKmh} kph</span>`;
+        } else if (evt.event_type === "statfeed") {
+            const secondary = evt.secondary ? ` ${escapeHtml(evt.secondary)}` : "";
+            div.innerHTML = `<span class="ticker-name">${escapeHtml(evt.primary)}</span> — ${escapeHtml(evt.event_name)}${secondary}`;
+        } else if (evt.event_type === "crossbar") {
+            const who = evt.primary ? ` <span class="ticker-detail">(${escapeHtml(evt.primary)})</span>` : "";
+            div.innerHTML = `🔔 Crossbar hit!${who}`;
+        } else {
+            div.innerHTML = `${escapeHtml(evt.event_name)} — <span class="ticker-name">${escapeHtml(evt.primary)}</span>`;
+        }
+
+        ticker.prepend(div);
+
+        // Auto-remove old entries beyond limit
+        while (ticker.children.length > 8) {
+            ticker.removeChild(ticker.lastChild);
+        }
     }
 }
 
@@ -173,14 +880,15 @@ function _updateContent(m, state) {
    PRE-GAME — full showcase
    ══════════════════════════════════════════════════════════════ */
 function renderPregame(m, state, el) {
+    // Reset ticker count on new match
+    _lastRenderedEventCount = 0;
+
     const h2h = state.head_to_head || {};
     const isSolo = m.mode && m.mode.startsWith("solo_");
 
-    // Build bot showcase cards
     const blueCards = m.team_blue.map(b => botShowcase(b, "blue", isSolo)).join("");
     const orangeCards = m.team_orange.map(b => botShowcase(b, "orange", isSolo)).join("");
 
-    // H2H section (meaningful for standard modes with single bot type per team)
     const blueNames = new Set(m.team_blue.map(b => b.name));
     const orangeNames = new Set(m.team_orange.map(b => b.name));
     const isBotVsBot = blueNames.size === 1 && orangeNames.size === 1;
@@ -202,7 +910,6 @@ function renderPregame(m, state, el) {
         h2hHtml = `<div class="pre-h2h"><div class="pre-h2h-title">First meeting!</div></div>`;
     }
 
-    // Win probability bar
     let winProbHtml = "";
     const wp = m.win_probabilities || [];
     if (wp.length === 2) {
@@ -273,46 +980,56 @@ function botShowcase(bot, team, isSolo) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   LIVE — tiny corner badges (avoid game UI)
+   LIVE — badges with boost bars, speed, stats + top bar + ticker
    ══════════════════════════════════════════════════════════════ */
+// Cache the current match info so the high-frequency live stats updater
+// can access mode/team info without a full state push.
+let _currentMatch = null;
+
 function renderLiveBadges(m) {
+    _currentMatch = m;
     const blueEl = document.getElementById("live-blue");
     const orangeEl = document.getElementById("live-orange");
     const isSolo = m.mode && m.mode.startsWith("solo_");
     const deltas = m.mmr_deltas || {};
-    blueEl.innerHTML = buildBadgeCards(m.team_blue, "blue", isSolo, deltas);
-    orangeEl.innerHTML = buildBadgeCards(m.team_orange, "orange", isSolo, deltas);
+    const isPostgame = m.phase === "postgame";
+    blueEl.innerHTML = buildBadgeCards(m.team_blue, "blue", isSolo, deltas, isPostgame);
+    orangeEl.innerHTML = buildBadgeCards(m.team_orange, "orange", isSolo, deltas, isPostgame);
 }
 
-function buildBadgeCards(team, teamClass, expandAll, deltas) {
-    if (expandAll) {
-        // Solo queue: show each bot individually, no grouping
-        return team.map(b => {
-            const deltaHtml = _deltaHtml(deltas, b.id);
-            return `<div class="badge-card ${teamClass}">
-                <div class="badge-name">${escapeHtml(b.name)}</div>
-                <div class="badge-mmr">${formatMMR(b.mmr)}${deltaHtml}</div>
-                <div class="badge-mmr-label">MMR</div>
-            </div>`;
-        }).join("");
-    }
-    // Standard modes: group duplicate bots (same name) into "BotName ×N"
-    const grouped = [];
-    const seen = {};
-    for (const b of team) {
-        if (seen[b.name]) { seen[b.name].count++; }
-        else { seen[b.name] = { bot: b, count: 1 }; grouped.push(seen[b.name]); }
-    }
-    return grouped.map(g => {
-        const b = g.bot;
-        const suffix = g.count > 1 ? ` <span class="badge-count">×${g.count}</span>` : "";
+function buildBadgeCards(team, teamClass, expandAll, deltas, isPostgame) {
+    // Always show one card per individual bot.
+    // The Stats API names duplicates as "Name", "Name (2)", "Name (3)", etc.
+    // Track name occurrences so data-bot-name matches the Stats API.
+    const nameCounts = {};
+    return team.map(b => {
         const deltaHtml = _deltaHtml(deltas, b.id);
-        return `<div class="badge-card ${teamClass}">
-            <div class="badge-name">${escapeHtml(b.name)}${suffix}</div>
-            <div class="badge-mmr">${formatMMR(b.mmr)}${deltaHtml}</div>
-            <div class="badge-mmr-label">MMR</div>
-        </div>`;
+        nameCounts[b.name] = (nameCounts[b.name] || 0) + 1;
+        const statsName = nameCounts[b.name] === 1 ? b.name : `${b.name} (${nameCounts[b.name]})`;
+        return _buildSingleBadge(b, teamClass, deltaHtml, isPostgame, "", statsName);
     }).join("");
+}
+
+function _buildSingleBadge(bot, teamClass, deltaHtml, isPostgame, suffix, statsName) {
+    suffix = suffix || "";
+    // statsName is the name the Stats API uses for this player slot
+    // (e.g. "Nexto", "Nexto (2)", "Nexto (3)") — used to match live stats updates
+    const dataBotName = statsName || bot.name;
+    const displayName = dataBotName;
+    return `<div class="badge-card ${teamClass}" data-bot-name="${escapeHtml(dataBotName)}">
+        <div class="badge-name">${escapeHtml(displayName)}${suffix}</div>
+        <div class="badge-mmr">${formatMMR(bot.mmr)}${deltaHtml}</div>
+        <div class="badge-mmr-label">MMR</div>
+        ${!isPostgame ? `
+        <div class="badge-speed"></div>
+        <div class="boost-bar-container"><div class="boost-bar-fill" style="width:0%"></div></div>
+        <div class="badge-stats-grid">
+            <div class="stat-hdr">⭐</div><div class="stat-hdr">⚽</div><div class="stat-hdr">🎯</div><div class="stat-hdr">🤝</div><div class="stat-hdr">🛡️</div><div class="stat-hdr">💥</div><div class="stat-hdr">👆</div>
+            <div class="stat-val" data-stat="score">0</div><div class="stat-val" data-stat="goals">0</div><div class="stat-val" data-stat="shots">0</div><div class="stat-val" data-stat="assists">0</div><div class="stat-val" data-stat="saves">0</div><div class="stat-val" data-stat="demos">0</div><div class="stat-val" data-stat="touches">0</div>
+        </div>
+        <div class="badge-demolished-label" style="display:none">💀 DEMOLISHED</div>
+        ` : ""}
+    </div>`;
 }
 
 function _deltaHtml(deltas, botId) {
@@ -322,6 +1039,198 @@ function _deltaHtml(deltas, botId) {
     const cls = d > 0 ? "badge-delta-pos" : "badge-delta-neg";
     const sign = d > 0 ? "+" : "";
     return ` <span class="${cls}">${sign}${d}</span>`;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   POSTGAME — advanced stats table
+   ══════════════════════════════════════════════════════════════ */
+
+function renderPostgameStats(stats) {
+    const el = document.getElementById("postgame-stats");
+    if (!stats || !stats.players || Object.keys(stats.players).length === 0) {
+        el.style.display = "none";
+        return;
+    }
+
+    const players = Object.values(stats.players);
+    const blue = players.filter(p => p.team_num === 0);
+    const orange = players.filter(p => p.team_num === 1);
+
+    function playerRow(p, isFirst, teamClass) {
+        const dividerClass = isFirst ? "" : "";
+        return `<tr class="${teamClass}">
+            <td class="player-name">${escapeHtml(p.name)}</td>
+            <td>${p.goals}</td>
+            <td>${p.assists}</td>
+            <td>${p.saves}</td>
+            <td>${p.shots}</td>
+            <td>${p.demos}</td>
+            <td>${p.touches}</td>
+            <td>${p.avg_boost}</td>
+            <td>${p.pct_supersonic}%</td>
+            <td>${p.pct_ground}%</td>
+            <td>${p.pct_wall}%</td>
+            <td>${p.pct_air}%</td>
+        </tr>`;
+    }
+
+    const blueRows = blue.map((p, i) => playerRow(p, i === 0, "team-blue")).join("");
+    const orangeRows = orange.map((p, i) => playerRow(p, i === 0, "team-orange")).join("");
+
+    el.innerHTML = `
+        <div class="postgame-stats-title">Match Stats</div>
+        <table class="postgame-stats-table">
+            <thead><tr>
+                <th style="text-align:left">Player</th>
+                <th>Goals</th><th>Assists</th><th>Saves</th><th>Shots</th><th>Demos</th><th>Touches</th>
+                <th>Avg Boost</th><th>Supersonic</th><th>Ground</th><th>Wall</th><th>Air</th>
+            </tr></thead>
+            <tbody>
+                ${blueRows}
+                <tr class="team-divider"><td colspan="12"></td></tr>
+                ${orangeRows}
+            </tbody>
+        </table>`;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   SCOREBOARD — full-screen post-match scoreboard
+   ══════════════════════════════════════════════════════════════ */
+
+function renderScoreboard(m, state, el) {
+    const winner = m.winner;
+    const resultClass = winner === "blue" ? "blue-win" : winner === "orange" ? "orange-win" : "draw";
+    const resultText = winner === "blue" ? "Blue Wins" : winner === "orange" ? "Orange Wins" : "Draw";
+    const deltas = m.mmr_deltas || {};
+    const stats = m.post_match_stats || state.post_match_stats;
+
+    // Team display names (unique bot names per team)
+    const blueNames = [...new Set((m.team_blue || []).map(b => b.name))].join(" & ");
+    const orangeNames = [...new Set((m.team_orange || []).map(b => b.name))].join(" & ");
+
+    // Validate stats players belong to the current match
+    // The Stats API names duplicates as "Name", "Name (2)", "Name (3)", etc.
+    const allMatchBots = [...(m.team_blue || []), ...(m.team_orange || [])];
+    const nameCounts = {};
+    const matchApiNames = new Set();
+    for (const b of allMatchBots) {
+        nameCounts[b.name] = (nameCounts[b.name] || 0) + 1;
+        const n = nameCounts[b.name];
+        matchApiNames.add(n === 1 ? b.name : `${b.name} (${n})`);
+    }
+    let validStats = null;
+    if (stats && stats.players && Object.keys(stats.players).length > 0) {
+        // Filter to only players in the current match
+        const filtered = {};
+        for (const [name, data] of Object.entries(stats.players)) {
+            if (matchApiNames.has(name)) filtered[name] = data;
+        }
+        if (Object.keys(filtered).length > 0) {
+            validStats = {...stats, players: filtered};
+        }
+    }
+    // MMR delta badges
+    const allBots = [...(m.team_blue || []), ...(m.team_orange || [])];
+    const seenIds = new Set();
+    const mmrItems = allBots.filter(b => {
+        if (seenIds.has(b.id)) return false;
+        seenIds.add(b.id);
+        return b.id in deltas;
+    }).map(b => {
+        const d = deltas[b.id];
+        const cls = d > 0 ? "delta-pos" : d < 0 ? "delta-neg" : "";
+        const sign = d > 0 ? "+" : "";
+        return `<div class="fs-sb-mmr-item">
+            ${escapeHtml(b.name)}
+            <span class="${cls}">${sign}${d} MMR</span>
+        </div>`;
+    }).join("");
+
+    // Stats table
+    let statsHtml = "";
+    if (validStats && validStats.players && Object.keys(validStats.players).length > 0) {
+        const players = Object.values(validStats.players);
+        const blue = players.filter(p => p.team_num === 0);
+        const orange = players.filter(p => p.team_num === 1);
+
+        // Find best values for highlighting
+        const allP = [...blue, ...orange];
+        const maxGoals = Math.max(...allP.map(p => p.goals));
+        const maxAssists = Math.max(...allP.map(p => p.assists));
+        const maxSaves = Math.max(...allP.map(p => p.saves));
+        const maxShots = Math.max(...allP.map(p => p.shots));
+        const maxDemos = Math.max(...allP.map(p => p.demos));
+        const maxTouches = Math.max(...allP.map(p => p.touches));
+        const maxScore = Math.max(...allP.map(p => p.score));
+
+        function hl(val, max) { return val > 0 && val === max ? ' class="stat-highlight"' : ''; }
+
+        function pRow(p, teamClass) {
+            return `<tr class="${teamClass}">
+                <td class="pname">${escapeHtml(p.name)}</td>
+                <td${hl(p.score, maxScore)}>${p.score}</td>
+                <td${hl(p.goals, maxGoals)}>${p.goals}</td>
+                <td${hl(p.shots, maxShots)}>${p.shots}</td>
+                <td${hl(p.assists, maxAssists)}>${p.assists}</td>
+                <td${hl(p.saves, maxSaves)}>${p.saves}</td>
+                <td${hl(p.demos, maxDemos)}>${p.demos}</td>
+                <td${hl(p.touches, maxTouches)}>${p.touches}</td>
+                <td>${p.avg_boost}</td>
+                <td>${p.bpm}</td>
+                <td>${Math.round(p.avg_speed)} kph</td>
+                <td>${p.pct_supersonic}%</td>
+                <td>${p.pct_ground}%</td>
+                <td>${p.pct_air}%</td>
+            </tr>`;
+        }
+
+        const blueRows = blue.map(p => pRow(p, "team-blue")).join("");
+        const orangeRows = orange.map(p => pRow(p, "team-orange")).join("");
+
+        statsHtml = `
+        <table class="fs-sb-stats-table">
+            <thead><tr>
+                <th style="text-align:left">Player</th>
+                <th>Score</th><th>Goals</th><th>Shots</th><th>Assists</th><th>Saves</th><th>Demos</th><th>Touches</th>
+                <th>Avg Boost</th><th>BPM</th><th>Avg Speed</th><th>Supersonic</th><th>Ground</th><th>Air</th>
+            </tr></thead>
+            <tbody>
+                ${blueRows}
+                <tr class="team-sep"><td colspan="14"></td></tr>
+                ${orangeRows}
+            </tbody>
+        </table>`;
+    }
+
+    el.innerHTML = `
+        <div class="fs-scoreboard">
+            <div class="fs-sb-header">
+                <img class="fs-sb-logo" src="/static/rlgym.png" alt="">
+                <div class="fs-sb-mode">${escapeHtml(m.mode_display || m.mode)}</div>
+                <div class="fs-sb-match-num">Match #${m.match_number}</div>
+            </div>
+
+            <div class="fs-sb-score-banner">
+                <div class="fs-sb-team-score blue">
+                    <div class="score-num">${m.score_blue}</div>
+                    <div class="fs-sb-team-name">${escapeHtml(blueNames)}</div>
+                </div>
+                <div class="fs-sb-center-divider">
+                    <div class="fs-sb-result ${resultClass}">${resultText}</div>
+                    <div class="fs-sb-map">${escapeHtml(m.map_name)}</div>
+                </div>
+                <div class="fs-sb-team-score orange">
+                    <div class="score-num">${m.score_orange}</div>
+                    <div class="fs-sb-team-name">${escapeHtml(orangeNames)}</div>
+                </div>
+            </div>
+
+            <div class="fs-sb-mmr-row">${mmrItems}</div>
+
+            ${statsHtml}
+        </div>`;
 }
 
 
@@ -348,9 +1257,6 @@ function renderIdleLeaderboard(state, el) {
     };
     const totalMatches = state.total_matches || 0;
 
-    // Compute scale factor so all rows fit on screen.
-    // Available height ≈ 1080 - header(~100) - footer(~36) - colTitle(~30) - padding(72) ≈ 842px
-    // Each row at scale 1 ≈ 44px content + 3px gap = 47px
     const maxEntries = Math.max(...modes.map(mk => (boards[mk] || []).length));
     const availableHeight = 842;
     const rowHeight = 47;

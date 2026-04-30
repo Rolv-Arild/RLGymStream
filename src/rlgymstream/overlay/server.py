@@ -78,6 +78,29 @@ def create_overlay_app(state: OverlayState) -> FastAPI:
 
         return EventSourceResponse(event_generator())
 
+    # ── SSE stream for high-frequency live stats (Stats API) ─────────
+
+    @app.get("/api/live_events")
+    async def live_events(request: Request):
+        """High-frequency SSE channel for live in-game stats (~10Hz)."""
+        async def event_generator():
+            last_version = -1
+            while True:
+                if await request.is_disconnected():
+                    break
+                if state.live_version != last_version:
+                    last_version = state.live_version
+                    yield {"event": "live_stats", "data": state.live_stats_to_json()}
+                await asyncio.sleep(0.033)  # ~30Hz to browser — smooth for boost/speed animations
+
+        return EventSourceResponse(event_generator())
+
+    # ── REST endpoint for live stats (used by chatbot) ───────────────
+
+    @app.get("/api/live_stats")
+    async def api_live_stats():
+        return json.loads(state.live_stats_to_json())
+
     return app
 
 

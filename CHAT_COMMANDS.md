@@ -73,6 +73,15 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 | `!predict <A>, <B>, <C> vs <D>, <E>, <F> [mode]` | Predict with explicit teams and mode |
 | `!predict <MMR> vs <MMR>` | Predict from raw MMR values (e.g. `!predict 1500 vs 1200`) |
 
+## Live Stats (Stats API)
+
+| Command | Description |
+|---|---|
+| `!boost` | Show live boost levels of all bots in the current match |
+| `!speed` | Show live speeds of all bots (with ⚡ for supersonic) |
+| `!live` | Live in-match stats summary — goals, assists, saves, demos per bot. Alias: `!livestats` |
+| `!goalspeed` | Show the last goal's speed, scorer, and assister |
+
 ---
 
 ## Examples
@@ -97,6 +106,10 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 !bot Nexto 2v2
 !last 3 Nexto
 !last 2 1v1 Necto
+!boost
+!speed
+!live
+!goalspeed
 ```
 
 ## Notes

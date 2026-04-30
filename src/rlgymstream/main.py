@@ -19,7 +19,7 @@ import uvicorn
 
 from rlgymstream.config import AppConfig, MatchMode
 from rlgymstream.db.database import Database
-from rlgymstream.db.models import Match as MatchModel
+from rlgymstream.db.models import Match as MatchModel, MatchPlayerStats
 from rlgymstream.match.bot_discovery import discover_bots
 from rlgymstream.match.launcher import MatchLauncher
 from rlgymstream.matchmaking.matchmaker import MatchSetup, pick_match, pick_mode
@@ -31,6 +31,7 @@ from rlgymstream.overlay.state import (
     OverlayMatchState,
     OverlayState,
 )
+from rlgymstream.stats_api.client import StatsApiClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -122,6 +123,14 @@ async def run(config: AppConfig) -> None:
     # Graceful shutdown
     stop_event = asyncio.Event()
 
+    # Start Stats API websocket client
+    stats_client = StatsApiClient(
+        port=config.stats_api_port,
+        on_update=lambda: overlay_state.update_live_stats(stats_client.live_stats),
+    )
+    stats_api_task = asyncio.create_task(stats_client.run())
+    logger.info("Stats API client started (port %d)", config.stats_api_port)
+
     def _handle_signal() -> None:
         stop_event.set()
         server.should_exit = True
@@ -192,6 +201,10 @@ async def run(config: AppConfig) -> None:
             logger.info("Map: %s", setup.display_map_name)
 
             # ── Pre-game phase ───────────────────────────────────────
+            # Reset Stats API live data for the new match
+            stats_client.reset()
+            overlay_state.set_post_match_stats(None)
+
             match_state = _build_match_state(setup, match_counter, "pregame", db,
                                              anchored_bot_ids=anchored_bot_ids.get(mode.value, set()))
 
@@ -237,6 +250,29 @@ async def run(config: AppConfig) -> None:
             )
 
             # ── Post-game ─────────────────────────────────────────────
+            # Capture postgame advanced stats from Stats API
+            if stats_client.live_stats.players:
+                # Validate that stats players match the current match bots
+                # Use Stats API naming convention for duplicates: "B", "B (2)", etc.
+                match_api_names = _stats_api_player_names(setup)
+                stats_player_names = set(stats_client.live_stats.players.keys())
+                if stats_player_names & match_api_names:
+                    raw_stats = stats_client.live_stats.postgame_to_dict()
+                    # Filter out any stale players from a previous match
+                    raw_stats["players"] = {
+                        name: data for name, data in raw_stats["players"].items()
+                        if name in match_api_names
+                    }
+                    overlay_state.set_post_match_stats(raw_stats)
+                else:
+                    logger.warning(
+                        "Stats API players %s don't match current match bots %s — skipping post_match_stats",
+                        stats_player_names, match_api_names,
+                    )
+                    overlay_state.set_post_match_stats(None)
+            else:
+                overlay_state.set_post_match_stats(None)
+
             # Persist match result
             match_record = MatchModel(
                 mode=mode.value,
@@ -250,6 +286,41 @@ async def run(config: AppConfig) -> None:
                 duration_seconds=result.duration_seconds,
             )
             db.save_match(match_record)
+
+            # Persist post-game per-player stats from the Stats API
+            if stats_client.live_stats.players and match_record.id is not None:
+                # Build a name → bot_id map using Stats API naming convention
+                name_to_bot_id = _stats_api_name_to_bot_id(setup)
+                postgame = stats_client.live_stats.postgame_to_dict()
+                player_stats_rows: list[MatchPlayerStats] = []
+                for pname, pdata in postgame.get("players", {}).items():
+                    if pname not in name_to_bot_id:
+                        continue  # skip stale players from previous match
+                    player_stats_rows.append(MatchPlayerStats(
+                        match_id=match_record.id,
+                        bot_id=name_to_bot_id.get(pname),
+                        player_name=pname,
+                        team_num=pdata.get("team_num", 0),
+                        score=pdata.get("score", 0),
+                        goals=pdata.get("goals", 0),
+                        shots=pdata.get("shots", 0),
+                        assists=pdata.get("assists", 0),
+                        saves=pdata.get("saves", 0),
+                        demos=pdata.get("demos", 0),
+                        touches=pdata.get("touches", 0),
+                        avg_boost=pdata.get("avg_boost", 0.0),
+                        avg_speed=pdata.get("avg_speed", 0.0),
+                        pct_supersonic=pdata.get("pct_supersonic", 0.0),
+                        pct_ground=pdata.get("pct_ground", 0.0),
+                        pct_wall=pdata.get("pct_wall", 0.0),
+                        pct_air=pdata.get("pct_air", 0.0),
+                        pct_demolished=pdata.get("pct_demolished", 0.0),
+                    ))
+                db.save_match_player_stats(player_stats_rows)
+                logger.info(
+                    "Saved %d player stat rows for match #%d",
+                    len(player_stats_rows), match_record.id,
+                )
 
             # Update OpenSkill ratings
             update_ratings(db, mode.value, blue_ids, orange_ids, result.winner,
@@ -272,7 +343,34 @@ async def run(config: AppConfig) -> None:
             match_state.mmr_deltas = mmr_deltas
             overlay_state.update_match(match_state)
 
-            # Let viewers see the in-game scoreboard + MMR deltas
+            # Let the in-game celebration play out
+            await _sleep_or_stop(config.celebration_delay, stop_event)
+
+            # Transition to full-screen scoreboard overlay
+            # Embed stats directly in match state so they're guaranteed in sync
+            match_api_names = _stats_api_player_names(setup)
+            stats_snapshot = overlay_state.post_match_stats
+            if stats_snapshot and stats_snapshot.get("players"):
+                # Filter to only current match players
+                filtered_players = {
+                    name: data for name, data in stats_snapshot["players"].items()
+                    if name in match_api_names
+                }
+                if filtered_players:
+                    stats_snapshot = {**stats_snapshot, "players": filtered_players}
+                    match_state.post_match_stats = stats_snapshot
+                else:
+                    logger.warning(
+                        "post_match_stats players %s don't match match bots %s — dropping",
+                        set(stats_snapshot["players"].keys()), match_api_names,
+                    )
+                    match_state.post_match_stats = None
+            else:
+                match_state.post_match_stats = None
+            match_state.phase = "scoreboard"
+            overlay_state.update_match(match_state)
+
+            # Show the scoreboard for the remaining post-match time
             await _sleep_or_stop(config.post_match_delay, stop_event)
 
             # Update overlay recent results
@@ -298,6 +396,8 @@ async def run(config: AppConfig) -> None:
         logger.exception("Fatal error in match loop")
     finally:
         launcher.shutdown()
+        stats_client.stop()
+        stats_api_task.cancel()
         if chatbot_monitor_task is not None:
             chatbot_monitor_task.cancel()
         if chatbot_procs:
@@ -314,6 +414,35 @@ async def run(config: AppConfig) -> None:
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _stats_api_player_names(setup: MatchSetup) -> set[str]:
+    """Build the set of player names as the Stats API would report them.
+
+    When the same bot name appears more than once in a match, the Stats API
+    names them ``"Name"``, ``"Name (2)"``, ``"Name (3)"``, etc.  This
+    helper replicates that convention so we can correctly match stats rows
+    to match participants.
+    """
+    counts: dict[str, int] = {}
+    names: set[str] = set()
+    for bot in setup.team_blue + setup.team_orange:
+        counts[bot.name] = counts.get(bot.name, 0) + 1
+        n = counts[bot.name]
+        names.add(bot.name if n == 1 else f"{bot.name} ({n})")
+    return names
+
+
+def _stats_api_name_to_bot_id(setup: MatchSetup) -> dict[str, int | None]:
+    """Map Stats API player names (with duplicate suffixes) to bot IDs."""
+    counts: dict[str, int] = {}
+    mapping: dict[str, int | None] = {}
+    for bot in setup.team_blue + setup.team_orange:
+        counts[bot.name] = counts.get(bot.name, 0) + 1
+        n = counts[bot.name]
+        api_name = bot.name if n == 1 else f"{bot.name} ({n})"
+        mapping[api_name] = bot.id
+    return mapping
 
 
 def _build_match_state(

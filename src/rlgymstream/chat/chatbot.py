@@ -24,6 +24,10 @@ Commands:
     !map                           — current map name
     !modes                         — active mode rotation
     !uptime                        — how long the bot has been running
+    !boost                         — live boost levels of all bots in current match
+    !speed                         — live speeds of all bots
+    !live                          — live in-match stats summary (alias: !livestats)
+    !goalspeed                     — last goal's speed, scorer, and assister
 
 All commands support "help" as an argument (e.g. !h2h help) to show usage.
 Mode shortcuts: 1v1, 2v2, 3v3, 1s, 2s, 3s, solo2v2, solo3v3, etc.
@@ -128,7 +132,8 @@ class ChatCommands(commands.Component):
     async def cmd_help(self, ctx: commands.Context) -> None:
         await ctx.send(
             "📋 !mmr · !rating · !pos · !lb · !best · !match · !h2h · !goals "
-            "· !bot · !stats · !winrate · !streak · !last · !predict · !map · !modes · !uptime"
+            "· !bot · !stats · !winrate · !streak · !last · !predict · !map · !modes · !uptime "
+            "· !boost · !speed · !live · !goalspeed"
         )
 
     @commands.command(name="mmr")
@@ -843,6 +848,94 @@ class ChatCommands(commands.Component):
             time_str = f"{seconds}s"
 
         await ctx.send(f"⏱️ Running for {time_str} — {session_matches} matches this session, {total_matches} all time")
+
+    # ── Live Stats API commands ──────────────────────────────
+
+    async def _fetch_live_stats(self) -> dict | None:
+        """Fetch live stats from the overlay HTTP API."""
+        import aiohttp
+        url = f"http://{self.bot._config.overlay_host}:{self.bot._config.overlay_port}/api/live_stats"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=3)) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+        except Exception:
+            pass
+        return None
+
+    @commands.command(name="boost")
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_boost(self, ctx: commands.Context) -> None:
+        """!boost — show live boost levels of all bots in the current match."""
+        stats = await self._fetch_live_stats()
+        if not stats or not stats.get("players"):
+            await ctx.send("No live stats available (match may not be in progress).")
+            return
+        parts = []
+        for name, p in stats["players"].items():
+            team = "🔵" if p.get("team_num") == 0 else "🟠"
+            boost = p.get("boost", 0)
+            parts.append(f"{team} {name}: {boost}%")
+        await ctx.send(f"🚀 Boost — {' | '.join(parts)}")
+
+    @commands.command(name="speed")
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_speed(self, ctx: commands.Context) -> None:
+        """!speed — show live speeds of all bots in the current match."""
+        stats = await self._fetch_live_stats()
+        if not stats or not stats.get("players"):
+            await ctx.send("No live stats available (match may not be in progress).")
+            return
+        parts = []
+        for name, p in stats["players"].items():
+            team = "🔵" if p.get("team_num") == 0 else "🟠"
+            kmh = round(p.get("speed", 0))
+            sonic = " ⚡" if p.get("is_supersonic") else ""
+            parts.append(f"{team} {name}: {kmh} km/h{sonic}")
+        await ctx.send(f"💨 Speed — {' | '.join(parts)}")
+
+    @commands.command(name="live", aliases=["livestats"])
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_live(self, ctx: commands.Context) -> None:
+        """!live — show live in-match stats summary."""
+        stats = await self._fetch_live_stats()
+        if not stats or not stats.get("players"):
+            await ctx.send("No live stats available (match may not be in progress).")
+            return
+        parts = []
+        for name, p in stats["players"].items():
+            team = "🔵" if p.get("team_num") == 0 else "🟠"
+            g = p.get("goals", 0)
+            a = p.get("assists", 0)
+            s = p.get("saves", 0)
+            d = p.get("demos", 0)
+            parts.append(f"{team} {name}: {g}G {a}A {s}S {d}D")
+        await ctx.send(f"📊 Live — {' | '.join(parts)}")
+
+    @commands.command(name="goalspeed")
+    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
+    async def cmd_goalspeed(self, ctx: commands.Context) -> None:
+        """!goalspeed — show the last goal's speed and scorer."""
+        stats = await self._fetch_live_stats()
+        if not stats or not stats.get("events"):
+            await ctx.send("No goal data available.")
+            return
+        # Find the last goal event
+        events = stats["events"]
+        goal = None
+        for e in reversed(events):
+            if e.get("event_type") == "goal":
+                goal = e
+                break
+        if not goal:
+            await ctx.send("No goals scored yet this match.")
+            return
+        scorer = goal.get("primary", "Unknown")
+        speed_kmh = goal.get("details", {}).get("goal_speed_kmh", 0)
+        assist = goal.get("secondary", "")
+        assist_str = f" (assisted by {assist})" if assist else ""
+        await ctx.send(f"⚽ Last goal: {scorer}{assist_str} — {speed_kmh} km/h")
 
 
 # ── Bot class ────────────────────────────────────────────────────────
