@@ -308,6 +308,7 @@ async def run(config: AppConfig) -> None:
                         saves=pdata.get("saves", 0),
                         demos=pdata.get("demos", 0),
                         touches=pdata.get("touches", 0),
+                        car_touches=pdata.get("car_touches", 0),
                         avg_boost=pdata.get("avg_boost", 0.0),
                         avg_speed=pdata.get("avg_speed", 0.0),
                         pct_supersonic=pdata.get("pct_supersonic", 0.0),
@@ -315,6 +316,16 @@ async def run(config: AppConfig) -> None:
                         pct_wall=pdata.get("pct_wall", 0.0),
                         pct_air=pdata.get("pct_air", 0.0),
                         pct_demolished=pdata.get("pct_demolished", 0.0),
+                        bpm=pdata.get("bpm", 0.0),
+                        boost_consumed=pdata.get("boost_consumed", 0.0),
+                        total_frames=pdata.get("total_frames", 0),
+                        frames_boosting=pdata.get("frames_boosting", 0),
+                        frames_ground=pdata.get("frames_ground", 0),
+                        frames_wall=pdata.get("frames_wall", 0),
+                        frames_air=pdata.get("frames_air", 0),
+                        frames_supersonic=pdata.get("frames_supersonic", 0),
+                        frames_demolished=pdata.get("frames_demolished", 0),
+                        frames_powersliding=pdata.get("frames_powersliding", 0),
                     ))
                 db.save_match_player_stats(player_stats_rows)
                 logger.info(

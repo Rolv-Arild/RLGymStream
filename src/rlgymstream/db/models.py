@@ -79,6 +79,7 @@ class MatchPlayerStats:
     saves: int = 0
     demos: int = 0
     touches: int = 0
+    car_touches: int = 0
     avg_boost: float = 0.0
     avg_speed: float = 0.0
     pct_supersonic: float = 0.0
@@ -86,3 +87,13 @@ class MatchPlayerStats:
     pct_wall: float = 0.0
     pct_air: float = 0.0
     pct_demolished: float = 0.0
+    bpm: float = 0.0
+    boost_consumed: float = 0.0
+    total_frames: int = 0
+    frames_boosting: int = 0
+    frames_ground: int = 0
+    frames_wall: int = 0
+    frames_air: int = 0
+    frames_supersonic: int = 0
+    frames_demolished: int = 0
+    frames_powersliding: int = 0

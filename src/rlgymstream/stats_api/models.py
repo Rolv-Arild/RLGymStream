@@ -50,6 +50,7 @@ class PlayerLiveStats:
     _air_ticks: int = field(default=0, repr=False)
     _demolished_ticks: int = field(default=0, repr=False)
     _boosting_ticks: int = field(default=0, repr=False)
+    _powersliding_ticks: int = field(default=0, repr=False)
     _boost_consumed: float = field(default=0.0, repr=False)
     _prev_boost: int = field(default=-1, repr=False)
     _first_tick_time: float = field(default=0.0, repr=False)
@@ -80,6 +81,8 @@ class PlayerLiveStats:
             self._air_ticks += 1
         if self.is_demolished:
             self._demolished_ticks += 1
+        if self.is_powersliding:
+            self._powersliding_ticks += 1
 
     def to_dict(self) -> dict:
         return {
@@ -118,6 +121,7 @@ class PlayerLiveStats:
             "assists": self.assists,
             "saves": self.saves,
             "touches": self.touches,
+            "car_touches": self.car_touches,
             "demos": self.demos,
             "avg_boost": round(self._boost_sum / t, 1),
             "avg_speed": round(self._speed_sum / t, 1),
@@ -127,6 +131,16 @@ class PlayerLiveStats:
             "pct_air": round(100 * self._air_ticks / t, 1),
             "pct_demolished": round(100 * self._demolished_ticks / t, 1),
             "bpm": round(self._boost_consumed / duration_minutes, 1),
+            # Raw frame counts for database storage
+            "total_frames": self._tick_count,
+            "frames_boosting": self._boosting_ticks,
+            "frames_ground": self._ground_ticks,
+            "frames_wall": self._wall_ticks,
+            "frames_air": self._air_ticks,
+            "frames_supersonic": self._supersonic_ticks,
+            "frames_demolished": self._demolished_ticks,
+            "frames_powersliding": self._powersliding_ticks,
+            "boost_consumed": round(self._boost_consumed, 1),
         }
 
 

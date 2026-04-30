@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS match_player_stats (
     saves INTEGER NOT NULL DEFAULT 0,
     demos INTEGER NOT NULL DEFAULT 0,
     touches INTEGER NOT NULL DEFAULT 0,
+    car_touches INTEGER NOT NULL DEFAULT 0,
     avg_boost REAL NOT NULL DEFAULT 0.0,
     avg_speed REAL NOT NULL DEFAULT 0.0,
     pct_supersonic REAL NOT NULL DEFAULT 0.0,
@@ -66,6 +67,16 @@ CREATE TABLE IF NOT EXISTS match_player_stats (
     pct_wall REAL NOT NULL DEFAULT 0.0,
     pct_air REAL NOT NULL DEFAULT 0.0,
     pct_demolished REAL NOT NULL DEFAULT 0.0,
+    bpm REAL NOT NULL DEFAULT 0.0,
+    boost_consumed REAL NOT NULL DEFAULT 0.0,
+    total_frames INTEGER NOT NULL DEFAULT 0,
+    frames_boosting INTEGER NOT NULL DEFAULT 0,
+    frames_ground INTEGER NOT NULL DEFAULT 0,
+    frames_wall INTEGER NOT NULL DEFAULT 0,
+    frames_air INTEGER NOT NULL DEFAULT 0,
+    frames_supersonic INTEGER NOT NULL DEFAULT 0,
+    frames_demolished INTEGER NOT NULL DEFAULT 0,
+    frames_powersliding INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (match_id) REFERENCES matches(id),
     FOREIGN KEY (bot_id) REFERENCES bots(id)
 );
@@ -97,6 +108,24 @@ class Database:
     def _init_schema(self) -> None:
         with self._conn() as conn:
             conn.executescript(_SCHEMA)
+            # Migrate existing databases: add columns that may not exist yet
+            existing = {row[1] for row in conn.execute("PRAGMA table_info(match_player_stats)").fetchall()}
+            migrations = [
+                ("car_touches", "INTEGER NOT NULL DEFAULT 0"),
+                ("bpm", "REAL NOT NULL DEFAULT 0.0"),
+                ("boost_consumed", "REAL NOT NULL DEFAULT 0.0"),
+                ("total_frames", "INTEGER NOT NULL DEFAULT 0"),
+                ("frames_boosting", "INTEGER NOT NULL DEFAULT 0"),
+                ("frames_ground", "INTEGER NOT NULL DEFAULT 0"),
+                ("frames_wall", "INTEGER NOT NULL DEFAULT 0"),
+                ("frames_air", "INTEGER NOT NULL DEFAULT 0"),
+                ("frames_supersonic", "INTEGER NOT NULL DEFAULT 0"),
+                ("frames_demolished", "INTEGER NOT NULL DEFAULT 0"),
+                ("frames_powersliding", "INTEGER NOT NULL DEFAULT 0"),
+            ]
+            for col, typedef in migrations:
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE match_player_stats ADD COLUMN {col} {typedef}")
 
     # ── Bots ──────────────────────────────────────────────────────────
 
@@ -285,16 +314,22 @@ class Database:
             conn.executemany(
                 """INSERT INTO match_player_stats
                    (match_id, bot_id, player_name, team_num,
-                    score, goals, shots, assists, saves, demos, touches,
+                    score, goals, shots, assists, saves, demos, touches, car_touches,
                     avg_boost, avg_speed, pct_supersonic, pct_ground,
-                    pct_wall, pct_air, pct_demolished)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    pct_wall, pct_air, pct_demolished, bpm, boost_consumed,
+                    total_frames, frames_boosting, frames_ground, frames_wall,
+                    frames_air, frames_supersonic, frames_demolished, frames_powersliding)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 [
                     (s.match_id, s.bot_id, s.player_name, s.team_num,
                      s.score, s.goals, s.shots, s.assists, s.saves,
-                     s.demos, s.touches, s.avg_boost, s.avg_speed,
+                     s.demos, s.touches, s.car_touches,
+                     s.avg_boost, s.avg_speed,
                      s.pct_supersonic, s.pct_ground, s.pct_wall,
-                     s.pct_air, s.pct_demolished)
+                     s.pct_air, s.pct_demolished, s.bpm, s.boost_consumed,
+                     s.total_frames, s.frames_boosting, s.frames_ground,
+                     s.frames_wall, s.frames_air, s.frames_supersonic,
+                     s.frames_demolished, s.frames_powersliding)
                     for s in stats
                 ],
             )
@@ -307,6 +342,39 @@ class Database:
                 (match_id,),
             ).fetchall()
             return [_row_to_match_player_stats(r) for r in rows]
+
+    # Valid stat columns that can be queried for leaderboards
+    _STAT_COLUMNS = {
+        "goals", "assists", "saves", "shots", "demos", "touches", "car_touches",
+        "score", "avg_boost", "avg_speed", "pct_supersonic", "pct_ground",
+        "pct_wall", "pct_air", "pct_demolished", "bpm", "boost_consumed",
+    }
+
+    def get_stat_leaders(self, stat: str, mode: str | None = None,
+                         limit: int = 5, min_matches: int = 5) -> list[dict] | None:
+        """Return top bots ranked by average of a given stat.
+
+        Returns a list of dicts: [{bot_name, value, matches}, ...].
+        Returns None if the stat name is invalid.
+        """
+        if stat not in self._STAT_COLUMNS:
+            return None
+        with self._conn() as conn:
+            q = f"""
+                SELECT b.name, AVG(mps.{stat}) as val, COUNT(*) as n
+                FROM match_player_stats mps
+                JOIN bots b ON mps.bot_id = b.id
+                JOIN matches m ON mps.match_id = m.id
+                WHERE mps.bot_id IS NOT NULL
+            """
+            params: list = []
+            if mode:
+                q += " AND m.mode = ?"
+                params.append(mode)
+            q += f" GROUP BY mps.bot_id HAVING n >= ? ORDER BY val DESC LIMIT ?"
+            params.extend([min_matches, limit])
+            rows = conn.execute(q, params).fetchall()
+            return [{"bot_name": r["name"], "value": round(r["val"], 2), "matches": r["n"]} for r in rows]
 
     def get_bot_avg_stats(self, bot_id: int, mode: str | None = None,
                           limit: int | None = None) -> dict | None:
@@ -325,12 +393,16 @@ class Database:
                     AVG(mps.saves) as avg_saves,
                     AVG(mps.demos) as avg_demos,
                     AVG(mps.touches) as avg_touches,
+                    AVG(mps.car_touches) as avg_car_touches,
                     AVG(mps.avg_boost) as avg_boost,
                     AVG(mps.avg_speed) as avg_speed,
+                    AVG(mps.bpm) as avg_bpm,
+                    AVG(mps.boost_consumed) as avg_boost_consumed,
                     AVG(mps.pct_supersonic) as avg_pct_supersonic,
                     AVG(mps.pct_ground) as avg_pct_ground,
                     AVG(mps.pct_wall) as avg_pct_wall,
-                    AVG(mps.pct_air) as avg_pct_air
+                    AVG(mps.pct_air) as avg_pct_air,
+                    AVG(mps.pct_demolished) as avg_pct_demolished
                 FROM match_player_stats mps
                 JOIN matches m ON mps.match_id = m.id
                 WHERE mps.bot_id = ?
@@ -358,12 +430,16 @@ class Database:
                 "avg_saves": round(row["avg_saves"], 2),
                 "avg_demos": round(row["avg_demos"], 2),
                 "avg_touches": round(row["avg_touches"], 1),
+                "avg_car_touches": round(row["avg_car_touches"], 1),
                 "avg_boost": round(row["avg_boost"], 1),
                 "avg_speed": round(row["avg_speed"], 1),
+                "bpm": round(row["avg_bpm"], 1),
+                "boost_consumed": round(row["avg_boost_consumed"], 1),
                 "pct_supersonic": round(row["avg_pct_supersonic"], 1),
                 "pct_ground": round(row["avg_pct_ground"], 1),
                 "pct_wall": round(row["avg_pct_wall"], 1),
                 "pct_air": round(row["avg_pct_air"], 1),
+                "pct_demolished": round(row["avg_pct_demolished"], 1),
             }
 
     def get_head_to_head(self, bot_a_id: int, bot_b_id: int,
@@ -475,9 +551,19 @@ def _row_to_match_player_stats(row: sqlite3.Row) -> MatchPlayerStats:
         goals=row["goals"], shots=row["shots"],
         assists=row["assists"], saves=row["saves"],
         demos=row["demos"], touches=row["touches"],
+        car_touches=row["car_touches"],
         avg_boost=row["avg_boost"], avg_speed=row["avg_speed"],
         pct_supersonic=row["pct_supersonic"], pct_ground=row["pct_ground"],
         pct_wall=row["pct_wall"], pct_air=row["pct_air"],
         pct_demolished=row["pct_demolished"],
+        bpm=row["bpm"], boost_consumed=row["boost_consumed"],
+        total_frames=row["total_frames"],
+        frames_boosting=row["frames_boosting"],
+        frames_ground=row["frames_ground"],
+        frames_wall=row["frames_wall"],
+        frames_air=row["frames_air"],
+        frames_supersonic=row["frames_supersonic"],
+        frames_demolished=row["frames_demolished"],
+        frames_powersliding=row["frames_powersliding"],
     )
 
