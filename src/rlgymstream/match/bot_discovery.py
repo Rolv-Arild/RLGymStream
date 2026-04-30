@@ -113,7 +113,7 @@ def _register_bot(toml_path: Path, db: Database) -> Bot:
     language = details.get("language", "")
 
     # Logo
-    logo_file = details.get("logo_file", settings.get("logo_file", None))
+    logo_file = details.get("logo_file", settings.get("logo_file", "logo.png"))
     logo_path: str | None = None
     if logo_file:
         lp = abs_path.parent / logo_file
