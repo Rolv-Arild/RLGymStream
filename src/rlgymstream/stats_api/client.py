@@ -264,16 +264,38 @@ class StatsApiClient:
                 g.score_orange = score
 
         # Update per-player stats
-        for p in data.get("Players", []):
+        # Sort by TeamNum so blue (0) is processed before orange (1) — this
+        # ensures our global duplicate naming matches the overlay's ordering.
+        players_sorted = sorted(data.get("Players", []), key=lambda x: x.get("TeamNum", 0))
+        for p in players_sorted:
             name = p.get("Name", "")
             if not name:
                 continue
+            team_num = p.get("TeamNum", 0)
 
-            if name not in self._live_stats.players:
-                self._live_stats.players[name] = PlayerLiveStats(name=name)
+            # Find the correct key for this player.  The API uses per-team
+            # duplicate naming ("A", "A (2)") but cross-team duplicates share
+            # the same name.  We disambiguate by assigning a global suffix.
+            key = name
+            if key in self._live_stats.players and self._live_stats.players[key].team_num != team_num:
+                # Name collision with a different team — find a unique key
+                i = 2
+                while True:
+                    candidate = f"{name} ({i})"
+                    if candidate not in self._live_stats.players:
+                        key = candidate
+                        break
+                    if self._live_stats.players[candidate].team_num == team_num:
+                        # Same team — this is our slot (e.g. reconnect)
+                        key = candidate
+                        break
+                    i += 1
 
-            ps = self._live_stats.players[name]
-            ps.team_num = p.get("TeamNum", ps.team_num)
+            if key not in self._live_stats.players:
+                self._live_stats.players[key] = PlayerLiveStats(name=key)
+
+            ps = self._live_stats.players[key]
+            ps.team_num = team_num
             ps.shortcut = p.get("Shortcut", ps.shortcut)
 
             # Cumulative stats (always present)
@@ -377,6 +399,12 @@ class StatsApiClient:
 
     def _handle_countdown_begin(self, data: dict) -> None:
         self._live_stats.match_guid = data.get("MatchGuid", self._live_stats.match_guid)
+        event = EventEntry(
+            timestamp=time.time(),
+            event_type="countdown",
+            event_name="Countdown",
+        )
+        self._live_stats.add_event(event)
 
     def _handle_match_created(self, data: dict) -> None:
         guid = data.get("MatchGuid", "")

@@ -430,36 +430,29 @@ async def run(config: AppConfig) -> None:
 def _stats_api_player_names(setup: MatchSetup) -> set[str]:
     """Build the set of player names as the Stats API would report them.
 
-    When the same bot name appears more than once *on the same team*, the
-    Stats API names them ``"Name"``, ``"Name (2)"``, ``"Name (3)"``, etc.
-    Duplicates across different teams keep their base name (both are just
-    ``"Name"``).
+    The Stats API uses per-team duplicate naming, but cross-team duplicates
+    share the same base name.  Our client disambiguates globally by assigning
+    suffixes in encounter order.  We replicate that here by counting across
+    both teams (blue first, then orange).
     """
+    counts: dict[str, int] = {}
     names: set[str] = set()
-    for team in (setup.team_blue, setup.team_orange):
-        counts: dict[str, int] = {}
-        for bot in team:
-            counts[bot.name] = counts.get(bot.name, 0) + 1
-            n = counts[bot.name]
-            names.add(bot.name if n == 1 else f"{bot.name} ({n})")
+    for bot in setup.team_blue + setup.team_orange:
+        counts[bot.name] = counts.get(bot.name, 0) + 1
+        n = counts[bot.name]
+        names.add(bot.name if n == 1 else f"{bot.name} ({n})")
     return names
 
 
 def _stats_api_name_to_bot_id(setup: MatchSetup) -> dict[str, int | None]:
-    """Map Stats API player names (with per-team duplicate suffixes) to bot IDs.
-
-    Note: if the same base name appears on both teams without a suffix, this
-    maps to the LAST occurrence (orange team).  The Stats API itself may
-    report the same name for both, making them indistinguishable.
-    """
+    """Map Stats API player names (with global duplicate suffixes) to bot IDs."""
+    counts: dict[str, int] = {}
     mapping: dict[str, int | None] = {}
-    for team in (setup.team_blue, setup.team_orange):
-        counts: dict[str, int] = {}
-        for bot in team:
-            counts[bot.name] = counts.get(bot.name, 0) + 1
-            n = counts[bot.name]
-            api_name = bot.name if n == 1 else f"{bot.name} ({n})"
-            mapping[api_name] = bot.id
+    for bot in setup.team_blue + setup.team_orange:
+        counts[bot.name] = counts.get(bot.name, 0) + 1
+        n = counts[bot.name]
+        api_name = bot.name if n == 1 else f"{bot.name} ({n})"
+        mapping[api_name] = bot.id
     return mapping
 
 

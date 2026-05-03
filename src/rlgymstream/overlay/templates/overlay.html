@@ -772,30 +772,23 @@ function _updateTopBar(game) {
     `;
 }
 
-let _lastBallSpeedKmh = 0;  // last displayed ball speed
+let _lastBallSpeedKmh = 0;  // last non-zero ball speed for display
 let _ballSpeedFrozen = false;
 
 function _updateBallSpeed(game) {
     if (!game) return;
     const el = _els.liveBallSpeed;
-    const kmh = uuToKmh(game.ball_speed);
 
-    if (game.is_replay) {
-        // During goal replay — freeze at last known speed
-        _ballSpeedFrozen = true;
-    } else if (_ballSpeedFrozen) {
-        // Post-replay: stay frozen until ball starts moving again (kickoff)
-        if (kmh > 0) {
-            _ballSpeedFrozen = false;
-            _lastBallSpeedKmh = kmh;
-        }
-    } else {
-        _lastBallSpeedKmh = kmh;
+    if (!_ballSpeedFrozen) {
+        const kmh = uuToKmh(game.ball_speed);
+        if (kmh > 0) _lastBallSpeedKmh = kmh;
     }
 
-    const display = _ballSpeedFrozen ? _lastBallSpeedKmh : kmh;
-    el.innerHTML = `⚽ <span class="ball-speed-val">${display}</span> kph`;
+    el.innerHTML = `⚽ <span class="ball-speed-val">${_lastBallSpeedKmh}</span> kph`;
 }
+
+function _onGoalScored() { _ballSpeedFrozen = true; }
+function _onCountdownBegin() { _ballSpeedFrozen = false; }
 
 // The arc path length for our semicircle (radius 88, from 180° to 0°) = π × 88 ≈ 276.5
 const _ARC_LENGTH = 276.5;
@@ -865,6 +858,13 @@ function _updateTicker(events) {
     _lastRenderedEventCount = newCount;
 
     for (const evt of newEvents) {
+        // Ball speed freeze control
+        if (evt.event_type === "goal") _onGoalScored();
+        else if (evt.event_type === "countdown") _onCountdownBegin();
+
+        // Don't render non-display events in the ticker
+        if (evt.event_type === "countdown") continue;
+
         const div = document.createElement("div");
         const teamClass = evt.team_num === 0 ? "team-blue" : evt.team_num === 1 ? "team-orange" : "";
         const isGoal = evt.event_type === "goal";
@@ -1011,15 +1011,18 @@ function renderLiveBadges(m) {
     const isSolo = m.mode && m.mode.startsWith("solo_");
     const deltas = m.mmr_deltas || {};
     const isPostgame = m.phase === "postgame";
-    blueEl.innerHTML = buildBadgeCards(m.team_blue, "blue", isSolo, deltas, isPostgame);
-    orangeEl.innerHTML = buildBadgeCards(m.team_orange, "orange", isSolo, deltas, isPostgame);
+    // Use a shared name counter across both teams (blue first) to match
+    // the Stats API client's global disambiguation of cross-team duplicates.
+    const nameCounts = {};
+    blueEl.innerHTML = buildBadgeCards(m.team_blue, "blue", isSolo, deltas, isPostgame, nameCounts);
+    orangeEl.innerHTML = buildBadgeCards(m.team_orange, "orange", isSolo, deltas, isPostgame, nameCounts);
 }
 
-function buildBadgeCards(team, teamClass, expandAll, deltas, isPostgame) {
+function buildBadgeCards(team, teamClass, expandAll, deltas, isPostgame, nameCounts) {
     // Always show one card per individual bot.
-    // The Stats API names duplicates as "Name", "Name (2)", "Name (3)", etc.
-    // Track name occurrences so data-bot-name matches the Stats API.
-    const nameCounts = {};
+    // The Stats API names duplicates globally: "Name", "Name (2)", "Name (3)", etc.
+    // Use a shared nameCounts dict across both teams for cross-team dedup.
+    nameCounts = nameCounts || {};
     return team.map(b => {
         const deltaHtml = _deltaHtml(deltas, b.id);
         nameCounts[b.name] = (nameCounts[b.name] || 0) + 1;
@@ -1129,15 +1132,13 @@ function renderScoreboard(m, state, el) {
     const orangeNames = [...new Set((m.team_orange || []).map(b => b.name))].join(" & ");
 
     // Validate stats players belong to the current match
-    // The Stats API names duplicates per-team: "Name", "Name (2)", etc.
+    // Use global name counting (blue first, then orange) to match client keys.
     const matchApiNames = new Set();
-    for (const team of [m.team_blue || [], m.team_orange || []]) {
-        const nameCounts = {};
-        for (const b of team) {
-            nameCounts[b.name] = (nameCounts[b.name] || 0) + 1;
-            const n = nameCounts[b.name];
-            matchApiNames.add(n === 1 ? b.name : `${b.name} (${n})`);
-        }
+    const nameCounts = {};
+    for (const b of [...(m.team_blue || []), ...(m.team_orange || [])]) {
+        nameCounts[b.name] = (nameCounts[b.name] || 0) + 1;
+        const n = nameCounts[b.name];
+        matchApiNames.add(n === 1 ? b.name : `${b.name} (${n})`);
     }
     let validStats = null;
     if (stats && stats.players && Object.keys(stats.players).length > 0) {
