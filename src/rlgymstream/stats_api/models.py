@@ -73,10 +73,10 @@ class PlayerLiveStats:
             self._boosting_ticks += 1
         if self.is_supersonic:
             self._supersonic_ticks += 1
-        if self.is_on_ground:
-            self._ground_ticks += 1
-        elif self.is_on_wall:
+        if self.is_on_wall:
             self._wall_ticks += 1
+        elif self.is_on_ground:
+            self._ground_ticks += 1
         else:
             self._air_ticks += 1
         if self.is_demolished:

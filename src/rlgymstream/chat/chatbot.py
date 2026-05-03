@@ -14,7 +14,8 @@ Commands:
     !h2h current [mode]            — head-to-head for the current match
     !goals <botA> vs <botB> [mode|overall|standard|solo] — head-to-head goal totals + duration
     !bot <name> [mode]             — bot info (author, description, win/loss)
-    !stats                         — total matches, number of bots, etc.
+    !info                          — total matches, number of bots, etc.
+    !stats [top|bottom|bot] <stat|bot> [mode] — stat leaders or per-bot averages
     !winrate <bot> [mode]          — win rate per mode or for a specific mode
     !streak <bot> [mode]           — current win/loss streak
     !last [N] [mode] [bot]         — last 1-3 match results, filtered by mode and/or bot
@@ -24,8 +25,6 @@ Commands:
     !map                           — current map name
     !modes                         — active mode rotation
     !uptime                        — how long the bot has been running
-    !top <stat> [mode]             — top 5 bots by a stat (goals, demos, boost, speed, etc.)
-    !botstats <bot> [mode]         — average match stats for a bot
 
 All commands support "help" as an argument (e.g. !h2h help) to show usage.
 Mode shortcuts: 1v1, 2v2, 3v3, 1s, 2s, 3s, solo2v2, solo3v3, etc.
@@ -130,8 +129,8 @@ class ChatCommands(commands.Component):
     async def cmd_help(self, ctx: commands.Context) -> None:
         await ctx.send(
             "📋 !mmr · !rating · !pos · !lb · !best · !match · !h2h · !goals "
-            "· !bot · !stats · !winrate · !streak · !last · !predict · !map · !modes · !uptime "
-            "· !boost · !speed · !live · !goalspeed"
+            "· !bot · !info · !winrate · !streak · !last · !predict · !map · !modes · !uptime "
+            "· !stats"
         )
 
     @commands.command(name="mmr")
@@ -372,9 +371,9 @@ class ChatCommands(commands.Component):
 
         await ctx.send(" | ".join(parts))
 
-    @commands.command(name="stats")
+    @commands.command(name="info")
     @commands.cooldown(rate=1, per=10, key=commands.BucketType.channel)
-    async def cmd_stats(self, ctx: commands.Context) -> None:
+    async def cmd_info(self, ctx: commands.Context) -> None:
         total_matches = self.bot._db.get_match_count()
         all_bots = self.bot._db.get_all_bots(enabled_only=True)
         await ctx.send(
@@ -849,73 +848,99 @@ class ChatCommands(commands.Component):
 
     # ── Bot Stats commands ─────────────────────────────────────
 
-    @commands.command(name="top")
+    # Shared stat alias mapping
+    _STAT_ALIASES = {
+        "goals": "goals", "goal": "goals",
+        "assists": "assists", "assist": "assists",
+        "saves": "saves", "save": "saves",
+        "shots": "shots", "shot": "shots",
+        "demos": "demos", "demo": "demos",
+        "touches": "touches", "touch": "touches",
+        "cartouches": "car_touches", "car_touches": "car_touches",
+        "score": "score", "points": "score",
+        "boost": "avg_boost", "avgboost": "avg_boost", "avg_boost": "avg_boost",
+        "speed": "avg_speed", "avgspeed": "avg_speed", "avg_speed": "avg_speed",
+        "supersonic": "pct_supersonic", "sonic": "pct_supersonic", "ss": "pct_supersonic",
+        "ground": "pct_ground", "gnd": "pct_ground",
+        "wall": "pct_wall",
+        "air": "pct_air",
+        "demolished": "pct_demolished",
+        "bpm": "bpm",
+        "boostconsumed": "boost_consumed", "boost_consumed": "boost_consumed",
+    }
+
+    def _stat_units(self, col: str) -> str:
+        if col == "avg_speed":
+            return " kph"
+        elif col.startswith("pct_"):
+            return "%"
+        return ""
+
+    @commands.command(name="stats")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
-    async def cmd_top(self, ctx: commands.Context, *, args: str = "") -> None:
-        """!top <stat> [mode] — show top 5 bots by a stat (goals, demos, boost, speed, etc.)."""
+    async def cmd_stats(self, ctx: commands.Context, *, args: str = "") -> None:
+        """!stats [top|bottom|bot] <stat|bot> [mode]
+
+        !stats top <stat> [mode]   — top 5 bots by a stat
+        !stats bottom <stat> [mode] — bottom 5 bots by a stat
+        !stats bot <name> [mode]   — average stats for a specific bot
+        !stats <stat> [mode]       — shortcut for !stats top <stat> [mode]
+        """
         if not args or self._is_help(args):
-            stats_list = "goals, assists, saves, shots, demos, touches, score, boost, speed, supersonic, bpm, air, wall, ground"
-            await ctx.send(f"Usage: !top <stat> [mode] — Available stats: {stats_list}")
+            await ctx.send(
+                "Usage: !stats top/bottom <stat> [mode] | !stats bot <name> [mode] — "
+                "Stats: goals, assists, saves, shots, demos, boost, speed, supersonic, bpm, air, wall, ground"
+            )
             return
 
-        # Map friendly names to DB column names
-        stat_aliases = {
-            "goals": "goals", "goal": "goals",
-            "assists": "assists", "assist": "assists",
-            "saves": "saves", "save": "saves",
-            "shots": "shots", "shot": "shots",
-            "demos": "demos", "demo": "demos",
-            "touches": "touches", "touch": "touches",
-            "cartouches": "car_touches", "car_touches": "car_touches",
-            "score": "score", "points": "score",
-            "boost": "avg_boost", "avgboost": "avg_boost", "avg_boost": "avg_boost",
-            "speed": "avg_speed", "avgspeed": "avg_speed", "avg_speed": "avg_speed",
-            "supersonic": "pct_supersonic", "sonic": "pct_supersonic", "ss": "pct_supersonic",
-            "ground": "pct_ground", "gnd": "pct_ground",
-            "wall": "pct_wall",
-            "air": "pct_air",
-            "demolished": "pct_demolished",
-            "bpm": "bpm",
-            "boostconsumed": "boost_consumed", "boost_consumed": "boost_consumed",
-        }
+        tokens = args.strip().split()
+        subcommand = tokens[0].lower()
+
+        if subcommand == "bot":
+            await self._stats_bot(ctx, " ".join(tokens[1:]))
+        elif subcommand == "top":
+            await self._stats_leaders(ctx, " ".join(tokens[1:]), ascending=False)
+        elif subcommand == "bottom":
+            await self._stats_leaders(ctx, " ".join(tokens[1:]), ascending=True)
+        else:
+            # No subcommand — treat as "!stats top <stat> [mode]"
+            await self._stats_leaders(ctx, args, ascending=False)
+
+    async def _stats_leaders(self, ctx: commands.Context, args: str, ascending: bool) -> None:
+        """Handle !stats top/bottom <stat> [mode]."""
+        if not args:
+            await ctx.send("Please specify a stat. Try: goals, demos, boost, speed, supersonic, bpm, saves, etc.")
+            return
 
         tokens = args.strip().split()
         stat_name = tokens[0].lower()
         mode_arg = tokens[1] if len(tokens) > 1 else None
         mode = self._resolve_mode(mode_arg)
-        # If the second token wasn't a valid mode, it might be part of the stat name
         if mode_arg and not mode:
             stat_name = args.strip().lower()
             mode = None
 
-        col = stat_aliases.get(stat_name)
+        col = self._STAT_ALIASES.get(stat_name)
         if not col:
             await ctx.send(f'Unknown stat "{tokens[0]}". Try: goals, demos, boost, speed, supersonic, bpm, saves, etc.')
             return
 
-        leaders = self.bot._db.get_stat_leaders(col, mode=mode, limit=5, min_matches=5)
+        leaders = self.bot._db.get_stat_leaders(col, mode=mode, limit=5, min_matches=5, ascending=ascending)
         if not leaders:
             await ctx.send(f"No data yet for stat \"{tokens[0]}\".")
             return
 
-        # Format units
-        units = ""
-        if col == "avg_speed":
-            units = " kph"
-        elif col.startswith("pct_"):
-            units = "%"
-
+        units = self._stat_units(col)
+        label = "Bottom" if ascending else "Top"
         display_stat = tokens[0].capitalize()
         mode_str = f" ({mode})" if mode else ""
         parts = [f"{i+1}. {r['bot_name']} ({r['value']}{units})" for i, r in enumerate(leaders)]
-        await ctx.send(f"🏆 Top {display_stat}{mode_str}: {' | '.join(parts)}")
+        await ctx.send(f"🏆 {label} {display_stat}{mode_str}: {' | '.join(parts)}")
 
-    @commands.command(name="botstats")
-    @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
-    async def cmd_botstats(self, ctx: commands.Context, *, args: str = "") -> None:
-        """!botstats <bot> [mode] — show a bot's average stats."""
-        if not args or self._is_help(args):
-            await ctx.send("Usage: !botstats <bot name> [mode] — show average match stats for a bot")
+    async def _stats_bot(self, ctx: commands.Context, args: str) -> None:
+        """Handle !stats bot <name> [mode]."""
+        if not args:
+            await ctx.send("Usage: !stats bot <bot name> [mode]")
             return
 
         name, mode = self._split_name_and_mode(args)

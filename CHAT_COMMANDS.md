@@ -12,7 +12,7 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 | Command | Description |
 |---|---|
 | `!help` | List all available commands |
-| `!stats` | Total matches played, number of active bots, number of modes |
+| `!info` | Total matches played, number of active bots, number of modes |
 | `!modes` | Show the active mode rotation |
 | `!uptime` | How long the bot has been running, session and all-time match counts |
 
@@ -77,8 +77,10 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 
 | Command | Description |
 |---|---|
-| `!top <stat> [mode]` | Top 5 bots ranked by a stat. Stats: goals, assists, saves, shots, demos, touches, score, boost, speed, supersonic, bpm, air, wall, ground, demolished, cartouches, boostconsumed |
-| `!botstats <bot> [mode]` | Show a bot's average match stats (goals, assists, saves, demos, shots, boost, BPM, speed, supersonic %, ground/wall/air %) |
+| `!stats top <stat> [mode]` | Top 5 bots ranked by a stat. Stats: goals, assists, saves, shots, demos, touches, score, boost, speed, supersonic, bpm, air, wall, ground |
+| `!stats bottom <stat> [mode]` | Bottom 5 bots by a stat |
+| `!stats bot <name> [mode]` | Show a bot's average match stats (goals, assists, saves, demos, shots, boost, BPM, speed, supersonic %, ground/wall/air %) |
+| `!stats <stat> [mode]` | Shortcut for `!stats top <stat> [mode]` |
 
 ---
 
@@ -104,11 +106,11 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 !bot Nexto 2v2
 !last 3 Nexto
 !last 2 1v1 Necto
-!top demos
-!top boost 1v1
-!top supersonic
-!botstats Nexto
-!botstats Necto 2v2
+!stats demos
+!stats top boost 1v1
+!stats bottom supersonic
+!stats bot Nexto
+!stats bot Necto 2v2
 ```
 
 ## Notes
@@ -116,6 +118,6 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 - **Bot names** are matched case-insensitively with fuzzy "did you mean?" suggestions.
 - **Mode** is always optional and appears as the last argument. Without it, commands show data across all modes (or default to 1v1 for predictions).
 - **`!predict`** with no arguments shows the prediction for the current live match. With arguments, it computes a prediction from the bots' current ratings.
-- **Cooldowns**: most commands have a 5-second per-user cooldown. `!stats`, `!modes`, and `!uptime` have a 10-second per-channel cooldown.
+- **Cooldowns**: most commands have a 5-second per-user cooldown. `!info`, `!modes`, and `!uptime` have a 10-second per-channel cooldown.
 - **Help**: any command supports `help` as an argument to show usage (e.g. `!h2h help`, `!predict help`).
 

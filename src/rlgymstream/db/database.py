@@ -351,14 +351,16 @@ class Database:
     }
 
     def get_stat_leaders(self, stat: str, mode: str | None = None,
-                         limit: int = 5, min_matches: int = 5) -> list[dict] | None:
-        """Return top bots ranked by average of a given stat.
+                         limit: int = 5, min_matches: int = 5,
+                         ascending: bool = False) -> list[dict] | None:
+        """Return top (or bottom) bots ranked by average of a given stat.
 
         Returns a list of dicts: [{bot_name, value, matches}, ...].
         Returns None if the stat name is invalid.
         """
         if stat not in self._STAT_COLUMNS:
             return None
+        order = "ASC" if ascending else "DESC"
         with self._conn() as conn:
             q = f"""
                 SELECT b.name, AVG(mps.{stat}) as val, COUNT(*) as n
@@ -371,7 +373,7 @@ class Database:
             if mode:
                 q += " AND m.mode = ?"
                 params.append(mode)
-            q += f" GROUP BY mps.bot_id HAVING n >= ? ORDER BY val DESC LIMIT ?"
+            q += f" GROUP BY mps.bot_id HAVING n >= ? ORDER BY val {order} LIMIT ?"
             params.extend([min_matches, limit])
             rows = conn.execute(q, params).fetchall()
             return [{"bot_name": r["name"], "value": round(r["val"], 2), "matches": r["n"]} for r in rows]
