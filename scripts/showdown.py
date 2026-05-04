@@ -225,7 +225,7 @@ async def run_game(
 
     game_map_upk = GAME_MAP_TO_UPK.get(map_name, map_name)
     match_config = flat.MatchConfiguration(
-        launcher=flat.Launcher.Epic,
+        # launcher=flat.Launcher.Epic,
         player_configurations=players,
         game_map_upk=game_map_upk,
         game_mode=flat.GameMode.Soccar,

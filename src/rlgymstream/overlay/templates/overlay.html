@@ -161,6 +161,7 @@
             color: #6b7280;
         }
         .ball-speed-indicator .ball-speed-val { color: #94a3b8; font-size: 14px; }
+        .ball-speed-indicator.goal-speed .ball-speed-val { color: #fbbf24; }
 
         /* ── Event ticker (inside bottom-left) ── */
         .event-ticker {
@@ -682,6 +683,9 @@ window.renderLiveStats = function(liveStats) {
     // Update top bar (scoreboard: scores + clock)
     _updateTopBar(liveStats.game);
 
+    // Update event ticker (must run before ball speed to handle freeze/unfreeze)
+    _updateTicker(liveStats.events, liveStats.total_event_count);
+
     // Update bottom-left (ball speed)
     _updateBallSpeed(liveStats.game);
 
@@ -690,23 +694,21 @@ window.renderLiveStats = function(liveStats) {
 
     // Update current player indicator (bottom-center)
     _updateCurrentPlayer(liveStats.game);
-
-    // Update event ticker
-    _updateTicker(liveStats.events);
 };
 
 function _updateLivePlayerStats(players, game) {
-    const targetName = (game && game.has_target) ? game.target_name : "";
+    const targetKey = (game && game.has_target && game.target_name)
+        ? `${game.target_team_num}:${game.target_name}` : "";
     // For each badge card, find the matching player and update live elements
     document.querySelectorAll(".badge-card[data-bot-name]").forEach(card => {
         const name = card.dataset.botName;
-        const isSpectated = name === targetName;
+        const isSpectated = name === targetKey;
         // Eye emoji indicator
         let eye = card.querySelector(".spectate-eye");
         if (isSpectated && !eye) {
             eye = document.createElement("span");
             eye.className = "spectate-eye";
-            eye.textContent = "??️";
+            eye.textContent = "👁️";
             card.appendChild(eye);
         } else if (!isSpectated && eye) {
             eye.remove();
@@ -772,7 +774,8 @@ function _updateTopBar(game) {
     `;
 }
 
-let _lastBallSpeedKmh = 0;  // last non-zero ball speed for display
+let _lastBallSpeedKmh = 0;  // displayed ball speed
+let _lastNonZeroBallSpeedKmh = 0;  // last non-zero speed (used as goal speed)
 let _ballSpeedFrozen = false;
 
 function _updateBallSpeed(game) {
@@ -781,14 +784,17 @@ function _updateBallSpeed(game) {
 
     if (!_ballSpeedFrozen) {
         const kmh = uuToKmh(game.ball_speed);
-        if (kmh > 0) _lastBallSpeedKmh = kmh;
+        if (kmh > 0) _lastNonZeroBallSpeedKmh = kmh;
+        _lastBallSpeedKmh = kmh;
     }
 
-    el.innerHTML = `⚽ <span class="ball-speed-val">${_lastBallSpeedKmh}</span> kph`;
+    const display = _ballSpeedFrozen ? _lastNonZeroBallSpeedKmh : _lastBallSpeedKmh;
+    el.classList.toggle("goal-speed", _ballSpeedFrozen);
+    el.innerHTML = `⚽ <span class="ball-speed-val">${display}</span> kph`;
 }
 
 function _onGoalScored() { _ballSpeedFrozen = true; }
-function _onCountdownBegin() { _ballSpeedFrozen = false; }
+function _onCountdownBegin() { _ballSpeedFrozen = false; _lastBallSpeedKmh = 0; _lastNonZeroBallSpeedKmh = 0; }
 
 // The arc path length for our semicircle (radius 88, from 180° to 0°) = π × 88 ≈ 276.5
 const _ARC_LENGTH = 276.5;
@@ -802,13 +808,15 @@ function _updateBoostArc(game, players) {
     if (!arcPath || !arcNumber) return;
 
     // Hide entirely when not spectating anyone
-    if (!game.has_target || !game.target_name || !players[game.target_name]) {
+    const targetKey = game.has_target && game.target_name
+        ? `${game.target_team_num}:${game.target_name}` : "";
+    if (!targetKey || !players[targetKey]) {
         container.style.opacity = "0";
         return;
     }
     container.style.opacity = "1";
 
-    const p = players[game.target_name];
+    const p = players[targetKey];
     const boost = p.boost ?? 0;
 
     // Update arc fill: stroke-dashoffset = arcLength × (1 - boost/100)
@@ -846,20 +854,38 @@ function _updateCurrentPlayer(game) {
     }
 }
 
-function _updateTicker(events) {
-    if (!events || events.length === 0) return;
+function _updateTicker(events, totalEventCount) {
+    if (!events || events.length === 0) {
+        if (_lastRenderedEventCount > 0) {
+            _lastRenderedEventCount = 0;
+            _onCountdownBegin();
+        }
+        return;
+    }
     const ticker = _els.liveTicker;
 
-    // Only render new events
-    const newCount = events.length;
-    if (newCount <= _lastRenderedEventCount) return;
+    // totalEventCount is the server's monotonic counter of all events ever added.
+    // events[] is a sliding window (last N).  Our _lastRenderedEventCount tracks
+    // how many total events we've processed.
+    const total = totalEventCount || events.length;
 
-    const newEvents = events.slice(_lastRenderedEventCount);
-    _lastRenderedEventCount = newCount;
+    if (total < _lastRenderedEventCount) {
+        // Server reset (new match) — total went backwards
+        _lastRenderedEventCount = 0;
+        _onCountdownBegin();
+    }
+
+    if (total <= _lastRenderedEventCount) return;
+
+    // How many new events to process from the end of the events array
+    const newEventCount = Math.min(total - _lastRenderedEventCount, events.length);
+    const newEvents = events.slice(events.length - newEventCount);
+    _lastRenderedEventCount = total;
 
     for (const evt of newEvents) {
         // Ball speed freeze control
         if (evt.event_type === "goal") _onGoalScored();
+        else if (evt.event_type === "statfeed" && (evt.event_name === "Goal" || evt.event_name === "AerialGoal" || evt.event_name === "OvertimeGoal")) _onGoalScored();
         else if (evt.event_type === "countdown") _onCountdownBegin();
 
         // Don't render non-display events in the ticker
@@ -1023,20 +1049,21 @@ function buildBadgeCards(team, teamClass, expandAll, deltas, isPostgame, nameCou
     // The Stats API names duplicates globally: "Name", "Name (2)", "Name (3)", etc.
     // Use a shared nameCounts dict across both teams for cross-team dedup.
     nameCounts = nameCounts || {};
+    const teamNum = teamClass === "blue" ? 0 : 1;
     return team.map(b => {
         const deltaHtml = _deltaHtml(deltas, b.id);
         nameCounts[b.name] = (nameCounts[b.name] || 0) + 1;
         const statsName = nameCounts[b.name] === 1 ? b.name : `${b.name} (${nameCounts[b.name]})`;
-        return _buildSingleBadge(b, teamClass, deltaHtml, isPostgame, "", statsName);
+        return _buildSingleBadge(b, teamClass, deltaHtml, isPostgame, "", statsName, teamNum);
     }).join("");
 }
 
-function _buildSingleBadge(bot, teamClass, deltaHtml, isPostgame, suffix, statsName) {
+function _buildSingleBadge(bot, teamClass, deltaHtml, isPostgame, suffix, statsName, teamNum) {
     suffix = suffix || "";
     // statsName is the name the Stats API uses for this player slot
     // (e.g. "Nexto", "Nexto (2)", "Nexto (3)") — used to match live stats updates
-    const dataBotName = statsName || bot.name;
-    const displayName = dataBotName;
+    const dataBotName = `${teamNum}:${statsName}`;
+    const displayName = statsName;
     return `<div class="badge-card ${teamClass}" data-bot-name="${escapeHtml(dataBotName)}">
         <div class="badge-name">${escapeHtml(displayName)}${suffix}</div>
         <div class="badge-mmr">${formatMMR(bot.mmr)}${deltaHtml}</div>
@@ -1135,10 +1162,17 @@ function renderScoreboard(m, state, el) {
     // Use global name counting (blue first, then orange) to match client keys.
     const matchApiNames = new Set();
     const nameCounts = {};
-    for (const b of [...(m.team_blue || []), ...(m.team_orange || [])]) {
+    for (const b of (m.team_blue || [])) {
         nameCounts[b.name] = (nameCounts[b.name] || 0) + 1;
         const n = nameCounts[b.name];
-        matchApiNames.add(n === 1 ? b.name : `${b.name} (${n})`);
+        const apiName = n === 1 ? b.name : `${b.name} (${n})`;
+        matchApiNames.add(`0:${apiName}`);
+    }
+    for (const b of (m.team_orange || [])) {
+        nameCounts[b.name] = (nameCounts[b.name] || 0) + 1;
+        const n = nameCounts[b.name];
+        const apiName = n === 1 ? b.name : `${b.name} (${n})`;
+        matchApiNames.add(`1:${apiName}`);
     }
     let validStats = null;
     if (stats && stats.players && Object.keys(stats.players).length > 0) {

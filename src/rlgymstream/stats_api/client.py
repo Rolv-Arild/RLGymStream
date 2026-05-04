@@ -273,26 +273,12 @@ class StatsApiClient:
                 continue
             team_num = p.get("TeamNum", 0)
 
-            # Find the correct key for this player.  The API uses per-team
-            # duplicate naming ("A", "A (2)") but cross-team duplicates share
-            # the same name.  We disambiguate by assigning a global suffix.
-            key = name
-            if key in self._live_stats.players and self._live_stats.players[key].team_num != team_num:
-                # Name collision with a different team — find a unique key
-                i = 2
-                while True:
-                    candidate = f"{name} ({i})"
-                    if candidate not in self._live_stats.players:
-                        key = candidate
-                        break
-                    if self._live_stats.players[candidate].team_num == team_num:
-                        # Same team — this is our slot (e.g. reconnect)
-                        key = candidate
-                        break
-                    i += 1
+            # Key by team:name to unambiguously identify each player slot,
+            # even when cross-team duplicates share the same base name.
+            key = f"{team_num}:{name}"
 
             if key not in self._live_stats.players:
-                self._live_stats.players[key] = PlayerLiveStats(name=key)
+                self._live_stats.players[key] = PlayerLiveStats(name=name)
 
             ps = self._live_stats.players[key]
             ps.team_num = team_num

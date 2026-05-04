@@ -296,10 +296,12 @@ async def run(config: AppConfig) -> None:
                 for pname, pdata in postgame.get("players", {}).items():
                     if pname not in name_to_bot_id:
                         continue  # skip stale players from previous match
+                    # Strip "team:" prefix for DB storage, keep full name (e.g. "Nexto (2)")
+                    player_name = pname.split(":", 1)[1] if ":" in pname else pname
                     player_stats_rows.append(MatchPlayerStats(
                         match_id=match_record.id,
                         bot_id=name_to_bot_id.get(pname),
-                        player_name=pname,
+                        player_name=player_name,
                         team_num=pdata.get("team_num", 0),
                         score=pdata.get("score", 0),
                         goals=pdata.get("goals", 0),
@@ -430,29 +432,31 @@ async def run(config: AppConfig) -> None:
 def _stats_api_player_names(setup: MatchSetup) -> set[str]:
     """Build the set of player names as the Stats API would report them.
 
-    The Stats API uses per-team duplicate naming, but cross-team duplicates
-    share the same base name.  Our client disambiguates globally by assigning
-    suffixes in encounter order.  We replicate that here by counting across
-    both teams (blue first, then orange).
+    The Stats API client keys players as "team_num:name" where name includes
+    any per-team duplicate suffix from RLBot (e.g. "BotName (2)").
+    We replicate that here by counting across both teams (blue first, then orange).
     """
     counts: dict[str, int] = {}
     names: set[str] = set()
-    for bot in setup.team_blue + setup.team_orange:
-        counts[bot.name] = counts.get(bot.name, 0) + 1
-        n = counts[bot.name]
-        names.add(bot.name if n == 1 else f"{bot.name} ({n})")
+    for team_num, team in ((0, setup.team_blue), (1, setup.team_orange)):
+        for bot in team:
+            counts[bot.name] = counts.get(bot.name, 0) + 1
+            n = counts[bot.name]
+            api_name = bot.name if n == 1 else f"{bot.name} ({n})"
+            names.add(f"{team_num}:{api_name}")
     return names
 
 
 def _stats_api_name_to_bot_id(setup: MatchSetup) -> dict[str, int | None]:
-    """Map Stats API player names (with global duplicate suffixes) to bot IDs."""
+    """Map Stats API player keys (team:name with global duplicate suffixes) to bot IDs."""
     counts: dict[str, int] = {}
     mapping: dict[str, int | None] = {}
-    for bot in setup.team_blue + setup.team_orange:
-        counts[bot.name] = counts.get(bot.name, 0) + 1
-        n = counts[bot.name]
-        api_name = bot.name if n == 1 else f"{bot.name} ({n})"
-        mapping[api_name] = bot.id
+    for team_num, team in ((0, setup.team_blue), (1, setup.team_orange)):
+        for bot in team:
+            counts[bot.name] = counts.get(bot.name, 0) + 1
+            n = counts[bot.name]
+            api_name = bot.name if n == 1 else f"{bot.name} ({n})"
+            mapping[f"{team_num}:{api_name}"] = bot.id
     return mapping
 
 

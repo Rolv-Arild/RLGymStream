@@ -218,6 +218,7 @@ class LiveMatchStats:
     game: GameLiveState = field(default_factory=GameLiveState)
     events: list[EventEntry] = field(default_factory=list)
     match_guid: str = ""
+    _total_event_count: int = field(default=0, repr=False)  # monotonic counter of all events added
 
     def clear(self) -> None:
         """Reset for a new match."""
@@ -225,6 +226,7 @@ class LiveMatchStats:
         self.game = GameLiveState()
         self.events.clear()
         self.match_guid = ""
+        self._total_event_count = 0
 
 
     def add_event(self, event: EventEntry) -> None:
@@ -243,6 +245,7 @@ class LiveMatchStats:
                     return  # duplicate, skip
 
         self.events.append(event)
+        self._total_event_count += 1
         if len(self.events) > _MAX_EVENTS:
             self.events = self.events[-_MAX_EVENTS:]
 
@@ -251,6 +254,7 @@ class LiveMatchStats:
             "players": {k: v.to_dict() for k, v in self.players.items()},
             "game": self.game.to_dict(),
             "events": [e.to_dict() for e in self.events],
+            "total_event_count": self._total_event_count,
         }
 
     def postgame_to_dict(self) -> dict:
