@@ -15,6 +15,7 @@ from rlbot.utils.maps import GAME_MAP_TO_UPK
 
 from rlgymstream.config import AppConfig
 from rlgymstream.matchmaking.matchmaker import MatchSetup
+from rlgymstream.stats_api.client import StatsApiClient, send_stats_command
 
 logger = logging.getLogger(__name__)
 
@@ -48,11 +49,20 @@ class MatchLauncher:
     connection stays open.
     """
 
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        stats_client: StatsApiClient | None = None,
+    ) -> None:
         self._config = config
+        self._stats_client = stats_client
         self._manager: MatchManager | None = None
 
-    # ── public API ────────────────────────────────────────────────────
+    def set_stats_client(self, stats_client: StatsApiClient | None) -> None:
+        """Attach or update the StatsApiClient instance used for game control."""
+        self._stats_client = stats_client
+
+    # ── public API ────────────────────────────────────────────────────────
 
     async def run_match(
         self,
@@ -83,7 +93,7 @@ class MatchLauncher:
             """Blocking work executed in a thread."""
             manager = self._get_manager()
             last_overlay_phase = ""
-            hud_cycled = False
+            hud_hidden = False
             match_started = False  # True once we've seen Countdown (fresh match)
 
             try:
@@ -107,25 +117,19 @@ class MatchLauncher:
                             time.sleep(0.1)
                             continue
 
-                    # Cycle HUD and queue replay save once when match first goes live
-                    if not hud_cycled and game_phase in (
+                    # Hide HUD via Stats API and queue replay save once when match first goes live
+                    if not hud_hidden and game_phase in (
                         flat.MatchPhase.Countdown,
                         flat.MatchPhase.Kickoff,
                         flat.MatchPhase.Active,
                     ):
-                        try:
-                            # Send twice to get clean feed. We use our own overlay
-                            manager.set_game_state(commands=["CycleHUD"])
-                            manager.set_game_state(commands=["CycleHUD"])
-                            logger.info("Sent CycleHUD")
-                        except Exception:
-                            logger.warning("Failed to send CycleHUD", exc_info=True)
+                        self._hide_hud()
                         try:
                             manager.set_game_state(commands=["QueSaveReplay"])
                             logger.info("Sent QueSaveReplay")
                         except Exception:
                             logger.warning("Failed to send QueSaveReplay", exc_info=True)
-                        hud_cycled = True
+                        hud_hidden = True
 
                     # Read scores from packet
                     score_blue = 0
@@ -215,7 +219,23 @@ class MatchLauncher:
                 logger.debug("Error shutting down MatchManager", exc_info=True)
             self._manager = None
 
-    # ── private helpers ───────────────────────────────────────────────
+    # ── private helpers ───────────────────────────────────────────────────
+
+    def _hide_hud(self) -> None:
+        """Hide the in-game HUD using the Stats API SetHUDVisibility command."""
+        sent = False
+        if self._stats_client is not None:
+            sent = self._stats_client.set_hud_visibility(False)
+        if not sent:
+            sent = send_stats_command(
+                port=self._config.stats_api_port,
+                command="SetHUDVisibility",
+                data={"bVisible": False},
+            )
+        if sent:
+            logger.info("Sent SetHUDVisibility(bVisible=False) via Stats API")
+        else:
+            logger.warning("Failed to send SetHUDVisibility via Stats API")
 
     def _get_manager(self) -> MatchManager:
         if self._manager is None:

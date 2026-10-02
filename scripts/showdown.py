@@ -38,6 +38,7 @@ from rlbot.utils.maps import STANDARD_MAPS, GAME_MAP_TO_UPK
 # Add src to path so we can reuse some utilities
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from rlgymstream.matchmaking.matchmaker import format_map_name
+from rlgymstream.stats_api.client import send_stats_command
 
 logging.basicConfig(
     level=logging.INFO,
@@ -244,7 +245,7 @@ async def run_game(
 
     def _run():
         last_phase = ""
-        hud_cycled = False
+        hud_hidden = False
         match_started = False
         try:
             manager.start_match(match_config, wait_for_start=True)
@@ -261,18 +262,18 @@ async def run_game(
                     else:
                         time.sleep(0.1)
                         continue
-                if not hud_cycled and phase in (
+                if not hud_hidden and phase in (
                     flat.MatchPhase.Countdown, flat.MatchPhase.Kickoff, flat.MatchPhase.Active
                 ):
                     try:
-                        manager.set_game_state(commands=["CycleHUD"])
+                        send_stats_command(command="SetHUDVisibility", data={"bVisible": False})
                     except Exception:
                         pass
                     try:
                         manager.set_game_state(commands=["QueSaveReplay"])
                     except Exception:
                         pass
-                    hud_cycled = True
+                    hud_hidden = True
 
                 score_blue = score_orange = 0
                 for t in packet.teams:

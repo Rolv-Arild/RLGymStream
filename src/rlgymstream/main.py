@@ -123,11 +123,12 @@ async def run(config: AppConfig) -> None:
     # Graceful shutdown
     stop_event = asyncio.Event()
 
-    # Start Stats API websocket client
+    # Start Stats API TCP client
     stats_client = StatsApiClient(
         port=config.stats_api_port,
         on_update=lambda: overlay_state.update_live_stats(stats_client.live_stats),
     )
+    launcher.set_stats_client(stats_client)
     stats_api_task = asyncio.create_task(stats_client.run())
     logger.info("Stats API client started (port %d)", config.stats_api_port)
 

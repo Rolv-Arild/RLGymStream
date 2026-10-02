@@ -6,6 +6,8 @@ no HTTP upgrade or WebSocket framing — it is plain TCP.
 
 This client connects via asyncio streams, parses each JSON message, and
 updates a shared LiveMatchStats instance that the overlay reads.
+
+It also supports outbound JSON command dispatching (e.g. SetHUDVisibility).
 """
 
 from __future__ import annotations
@@ -13,8 +15,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import socket
 import time
-from typing import Callable
+from typing import Any, Callable
 
 from rlgymstream.stats_api.models import (
     EventEntry,
@@ -32,6 +35,34 @@ logger = logging.getLogger("rlgymstream.stats_api")
 _MAX_MESSAGE_SIZE = 4 * 1024 * 1024
 
 
+def send_stats_command(
+    host: str = "127.0.0.1",
+    port: int = 49123,
+    command: str = "SetHUDVisibility",
+    data: dict[str, Any] | None = None,
+    timeout: float = 2.0,
+) -> bool:
+    """Send a one-off command to the Stats API TCP socket.
+
+    Useful when no persistent StatsApiClient is active (e.g. during standalone matches
+    or helper scripts). Opens a short-lived TCP connection, writes the JSON command,
+    and closes the connection.
+    """
+    payload = {"Command": command}
+    if data is not None:
+        payload["Data"] = data
+    raw = json.dumps(payload).encode("utf-8") + b"\n"
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as s:
+            s.sendall(raw)
+            logger.info("Sent %s command to Stats API (%s:%d)", command, host, port)
+            return True
+    except Exception as e:
+        logger.warning("Failed to send %s command to Stats API (%s:%d): %s", command, host, port, e)
+        return False
+
+
 class StatsApiClient:
     """Async TCP client for the Psyonix Stats API.
 
@@ -46,15 +77,24 @@ class StatsApiClient:
 
     def __init__(
         self,
+        host: str = "127.0.0.1",
         port: int = 49123,
         on_update: Callable[[], None] | None = None,
+        auto_hide_hud: bool = True,
     ) -> None:
+        self._host = host
         self._port = port
         self._on_update = on_update  # called after each state update
+        self._auto_hide_hud = auto_hide_hud
         self._live_stats = LiveMatchStats()
         self._running = False
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
 
     @property
     def live_stats(self) -> LiveMatchStats:
@@ -65,15 +105,18 @@ class StatsApiClient:
     async def run(self) -> None:
         """Connect and listen forever with auto-reconnect."""
         self._running = True
+        self._loop = asyncio.get_running_loop()
         backoff = 1.0
         max_backoff = 30.0
 
         while self._running:
             try:
                 self._reader, self._writer = await asyncio.open_connection(
-                    "localhost", self._port,
+                    self._host, self._port,
                 )
-                logger.info("Connected to Stats API at localhost:%d", self._port)
+                logger.info("Connected to Stats API at %s:%d", self._host, self._port)
+                if self._auto_hide_hud:
+                    self.set_hud_visibility(False)
                 backoff = 1.0
                 await self._listen()
             except ConnectionRefusedError:
@@ -116,6 +159,70 @@ class StatsApiClient:
     def reset(self) -> None:
         """Clear live stats for a new match."""
         self._live_stats.clear()
+
+    # ── Command sending ──────────────────────────────────────────────
+
+    def send_command(self, command: str, data: dict[str, Any] | None = None) -> bool:
+        """Send a JSON command to the connected Stats API socket.
+
+        Thread-safe: can be called safely from background threads or the event loop.
+        """
+        if not self._writer or self._writer.is_closing():
+            logger.debug("Cannot send %s: Stats API not connected", command)
+            return False
+
+        payload = {"Command": command, "Data": data or {}}
+        raw = json.dumps(payload).encode("utf-8") + b"\n"
+
+        def _do_write() -> None:
+            if self._writer and not self._writer.is_closing():
+                try:
+                    self._writer.write(raw)
+                    if self._loop and self._loop.is_running():
+                        self._loop.create_task(self._writer.drain())
+                except Exception:
+                    logger.warning("Failed to write %s to Stats API", command, exc_info=True)
+
+        if self._loop and self._loop.is_running():
+            try:
+                current_loop = asyncio.get_running_loop()
+                if current_loop is self._loop:
+                    _do_write()
+                    return True
+            except RuntimeError:
+                pass
+            self._loop.call_soon_threadsafe(_do_write)
+            return True
+        return False
+
+    async def send_command_async(self, command: str, data: dict[str, Any] | None = None) -> bool:
+        """Send a command asynchronously and await buffer drain."""
+        if not self._writer or self._writer.is_closing():
+            logger.debug("Cannot send %s: Stats API not connected", command)
+            return False
+
+        payload = {"Command": command, "Data": data or {}}
+        raw = json.dumps(payload).encode("utf-8") + b"\n"
+        try:
+            self._writer.write(raw)
+            await self._writer.drain()
+            return True
+        except Exception:
+            logger.warning("Failed to send %s to Stats API", command, exc_info=True)
+            return False
+
+    def set_hud_visibility(self, visible: bool = False) -> bool:
+        """Show or hide the in-game HUD via the Stats API SetHUDVisibility command.
+
+        Replaces the legacy RLBot `CycleHUD` command with Psyonix's native API.
+        """
+        logger.info("Setting HUD visibility to %s via Stats API", visible)
+        return self.send_command("SetHUDVisibility", {"bVisible": visible})
+
+    async def set_hud_visibility_async(self, visible: bool = False) -> bool:
+        """Show or hide the in-game HUD asynchronously via the Stats API."""
+        logger.info("Setting HUD visibility to %s via Stats API", visible)
+        return await self.send_command_async("SetHUDVisibility", {"bVisible": visible})
 
     # ── Message handling ──────────────────────────────────────
 
@@ -391,12 +498,16 @@ class StatsApiClient:
             event_name="Countdown",
         )
         self._live_stats.add_event(event)
+        if self._auto_hide_hud:
+            self.set_hud_visibility(False)
 
     def _handle_match_created(self, data: dict) -> None:
         guid = data.get("MatchGuid", "")
         if guid != self._live_stats.match_guid:
             self._live_stats.clear()
             self._live_stats.match_guid = guid
+        if self._auto_hide_hud:
+            self.set_hud_visibility(False)
 
     def _handle_match_ended(self, data: dict) -> None:
         winner_num = data.get("WinnerTeamNum", -1)
@@ -438,4 +549,3 @@ class StatsApiClient:
         "GoalReplayStart": _handle_goal_replay_start,
         "GoalReplayEnd": _handle_goal_replay_end,
     }
-
