@@ -201,6 +201,7 @@ class AppConfig:
                 cfg.mode_rotation = list(MatchMode)
 
             for src in data.get("bot_sources", []):
+                assert os.path.exists(src["path"])
                 cfg.bot_sources.append(BotSource(
                     path=Path(src["path"]),
                     bots=src.get("bots", []),

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 
 [[package]]
@@ -1196,25 +1196,25 @@ wheels = [
 
 [[package]]
 name = "rlbot"
-version = "2.0.0b52"
+version = "2.0.0b55"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "psutil" },
     { name = "rlbot-flatbuffers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/47/ab/401d6d57bae8db5a630c3a7c669c750cb37323956e529b0822cedc1c429c/rlbot-2.0.0b52.tar.gz", hash = "sha256:f64c469b4767192f92dc04d09fd5e4a946c1f226056e9c84b00e789885f93d99", size = 24892, upload-time = "2026-01-10T08:04:28.716Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b5/ed/fbca02e8b5609c249f80c90e29e8bdaff5c3c46b45797a629139fc184aaf/rlbot-2.0.0b55.tar.gz", hash = "sha256:de586ff69ebe3a2cdd1b37a556ec33f1fc29994e96db326cb8f3ddf3401a8f5a", size = 24980, upload-time = "2026-08-24T21:33:27.593Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/31/54/304334a4dbe17f397c6dd4010bfdd962977b42668045cd6219285fb5a746/rlbot-2.0.0b52-py3-none-any.whl", hash = "sha256:cba83b02aeb321549c75991aaabe734c3d71df7a7ebdafb71f1b8c860afcd8c7", size = 31626, upload-time = "2026-01-10T08:04:27.2Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/76/fdd9aca3383efb3015ebb7a9a360fd91e324ea571f630e4ab724c7ac61fd/rlbot-2.0.0b55-py3-none-any.whl", hash = "sha256:10c4283a3c9491348f6d829e8842159b43e90a0b986c5d4b05e3f23f6a1ac50e", size = 31615, upload-time = "2026-08-24T21:33:26.174Z" },
 ]
 
 [[package]]
 name = "rlbot-flatbuffers"
-version = "0.18.6"
+version = "0.19.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/13/dc/c4d540b0de66b30443481671558451694067fb93d8f3bbb377cb1994e5fe/rlbot_flatbuffers-0.18.6.tar.gz", hash = "sha256:da1fea123dec563dc490bad8e5facbb8ac8c324454b1d7fc3e40a95e25f0b808", size = 41410, upload-time = "2026-02-05T04:40:55.318Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/69/a064a6167091d8f633a893f91778651fd7a1c68c47a958b823785a1fb582/rlbot_flatbuffers-0.19.0.tar.gz", hash = "sha256:5f7aa84fa0cfd43bf475bae73375f3396f8445c3385e6d5f1f47caff5e079765", size = 238679, upload-time = "2026-08-16T02:13:14.783Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ef/6f/c0c7cd72d28bb16e574afb11b1b5c39fc31e5082245adc3ce2abb56a6b34/rlbot_flatbuffers-0.18.6-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6f4f809a3d96587d2a894395a8a4a37965dfbce19a032bc3d09f84c30ff7fcd8", size = 578524, upload-time = "2026-02-05T04:40:51.345Z" },
-    { url = "https://files.pythonhosted.org/packages/1d/77/aba3500a5ec7aa910462e53fd28739bf6e6890df23752a37216318b227ab/rlbot_flatbuffers-0.18.6-cp310-abi3-win_amd64.whl", hash = "sha256:40540d0dd744c5b689742f8d92da482a7557fa97274e5a491157bc976745f2a3", size = 449132, upload-time = "2026-02-05T04:40:53.066Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/4a/cc9d7ef9550d7f3ecf3c34c7ed8ef7d545c025c9c9dcb43f77af93351e56/rlbot_flatbuffers-0.19.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2474cc889372401b0f937a53261887ba33e8e7372025c1ed80e6e0de4865d3a0", size = 625233, upload-time = "2026-08-16T02:13:12.564Z" },
+    { url = "https://files.pythonhosted.org/packages/32/14/6c404fee0a8ea9674ccdc5d9519c05c607785c6b06b8042b685325cc7072/rlbot_flatbuffers-0.19.0-cp310-abi3-win_amd64.whl", hash = "sha256:e9ae909cdcaf259719992eeeb77f96b813f0c20a2a5a9241423376d5f754ee70", size = 507039, upload-time = "2026-08-16T02:13:13.702Z" },
 ]
 
 [[package]]
@@ -1238,7 +1238,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
     { name = "openskill", specifier = ">=6.2.0" },
-    { name = "rlbot", specifier = "==2.0.0b52" },
+    { name = "rlbot", specifier = "==2.0.0b55" },
     { name = "sse-starlette", specifier = ">=2.0.0" },
     { name = "twitchio", specifier = ">=3.2.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },

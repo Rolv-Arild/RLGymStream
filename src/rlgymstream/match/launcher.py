@@ -254,7 +254,7 @@ class MatchLauncher:
         game_map_upk = GAME_MAP_TO_UPK.get(setup.map_name, setup.map_name)
 
         return flat.MatchConfiguration(
-            # launcher=flat.Launcher.Epic,  # Auto detect
+            launcher=flat.Launcher.Epic,
             player_configurations=players,
             game_map_upk=game_map_upk,
             game_mode=flat.GameMode.Soccar,
@@ -265,4 +265,5 @@ class MatchLauncher:
             enable_rendering=flat.DebugRendering.AlwaysOff,
             enable_state_setting=True,
             auto_save_replay=True,
+            performance_monitor=flat.PerformanceMonitor.NeverShow,
         )
