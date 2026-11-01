@@ -54,10 +54,15 @@ class BotSource:
     empty **every** ``bot.toml`` found recursively under *path* is used.
 
     *exclude* lists relative paths (or simple ``fnmatch`` patterns) to skip.
+
+    *rlbot_botpack* marks every bot from this source as part of the public
+    RLBot botpack (playable locally by viewers); the overlay shows the
+    RLBot icon next to them.
     """
     path: Path
     bots: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
+    rlbot_botpack: bool = False
 
 
 @dataclass
@@ -135,6 +140,11 @@ class AppConfig:
             # empty bots list → use every bot.toml found recursively
             exclude = ["broken_bot"]
 
+            [[bot_sources]]
+            path = "C:/Users/me/AppData/Local/RLBot5/bots/bob_build_x86_64-windows"
+            bots = ["Nexto/bot.toml"]
+            rlbot_botpack = true             # shown with the RLBot icon
+
             # Anchor a bot's rating so it never changes.
             # Other bots are still rated normally against it.
             [[anchored_ratings]]
@@ -201,11 +211,15 @@ class AppConfig:
                 cfg.mode_rotation = list(MatchMode)
 
             for src in data.get("bot_sources", []):
-                assert os.path.exists(src["path"])
+                if not os.path.exists(src["path"]):
+                    raise FileNotFoundError(
+                        f"bot_sources path does not exist: {src['path']} (in {path})"
+                    )
                 cfg.bot_sources.append(BotSource(
                     path=Path(src["path"]),
                     bots=src.get("bots", []),
                     exclude=src.get("exclude", []),
+                    rlbot_botpack=bool(src.get("rlbot_botpack", False)),
                 ))
 
             for anchor in data.get("anchored_ratings", []):

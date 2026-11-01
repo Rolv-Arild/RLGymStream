@@ -7,7 +7,7 @@ Commands:
     !mmr <bot>                     — show a bot's MMR across all modes
     !rating <bot> [mode]           — show raw mu and sigma values
     !pos <bot> [mode]              — show a bot's rank position (alias: !position)
-    !lb [mode]                     — show top 5 leaderboard (default: 1v1)
+    !lb <mode>                     — show top 5 leaderboard for a mode
     !best [mode]                   — show the #1 bot per mode (or one mode)
     !match                         — show current/last match info
     !h2h <botA> vs <botB> [mode|overall|standard|solo] — head-to-head record
@@ -15,11 +15,11 @@ Commands:
     !goals <botA> vs <botB> [mode|overall|standard|solo] — head-to-head goal totals + duration
     !bot <name> [mode]             — bot info (author, description, win/loss)
     !info                          — total matches, number of bots, etc.
-    !stats [top|bottom|bot] <stat|bot> [mode] — stat leaders or per-bot averages
+    !stats [top|bottom|bot] <stat|bot> <mode> — stat leaders or per-bot averages
     !winrate <bot> [mode]          — win rate per mode or for a specific mode
     !streak <bot> [mode]           — current win/loss streak
     !last [N] [mode] [bot]         — last 1-3 match results, filtered by mode and/or bot
-    !predict <team1> vs <team2> [mode] — predict any matchup (comma-separated teams)
+    !predict <team1> vs <team2> <mode> — predict any matchup (comma-separated teams)
     !predict <MMR> vs <MMR>        — predict from raw MMR values
     !predict current               — win probability for current match
     !map                           — current map name
@@ -28,12 +28,17 @@ Commands:
 
 All commands support "help" as an argument (e.g. !h2h help) to show usage.
 Mode shortcuts: 1v1, 2v2, 3v3, 1s, 2s, 3s, solo2v2, solo3v3, etc.
+
+Commands that show a single mode's data (!lb, !stats, !predict) require the
+mode to be given explicitly — modes are never mixed or silently defaulted.
 """
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import logging
+import re
 import time
 from typing import TYPE_CHECKING
 
@@ -71,6 +76,22 @@ MODE_ALIASES = {
 def _mmr(mu: float) -> int:
     """Convert mu to display MMR (same formula as main.py)."""
     return round(20 * mu + 100)
+
+
+MODES_HINT = "1v1, 2v2, 3v3, solo2v2, solo3v3"
+
+_VS_RE = re.compile(r"\s+vs\.?\s+", re.IGNORECASE)
+
+
+def split_vs(text: str) -> tuple[str, str] | None:
+    """Split "A vs B" (any capitalisation, optional "vs.") into (A, B).
+
+    Returns None if there is no " vs " separator.
+    """
+    parts = _VS_RE.split(text.strip(), maxsplit=1)
+    if len(parts) != 2:
+        return None
+    return parts[0].strip(), parts[1].strip()
 
 
 # ── Component holding all chat commands ──────────────────────────────
@@ -183,10 +204,13 @@ class ChatCommands(commands.Component):
 
     @commands.command(name="lb", aliases=["leaderboard"])
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
-    async def cmd_lb(self, ctx: commands.Context, mode_arg: str = "1v1") -> None:
+    async def cmd_lb(self, ctx: commands.Context, mode_arg: str = "") -> None:
+        if not mode_arg or self._is_help(mode_arg):
+            await ctx.send(f"Usage: !lb <mode> — modes: {MODES_HINT}")
+            return
         mode = self._resolve_mode(mode_arg)
         if mode is None:
-            await ctx.send(f'Unknown mode "{mode_arg}". Try: 1v1, 2v2, 3v3, solo2v2, solo3v3')
+            await ctx.send(f'Unknown mode "{mode_arg}". Try: {MODES_HINT}')
             return
 
         with self.bot._overlay._lock:
@@ -271,17 +295,11 @@ class ChatCommands(commands.Component):
                 return
 
             name_a, name_b = blue_names[0], orange_names[0]
-        elif " vs " in rest.lower():
-            sep = " vs " if " vs " in rest else " VS "
-            parts = rest.split(sep, 1)
-            name_a, name_b = parts[0].strip(), parts[1].strip()
+        elif (vs := split_vs(rest)) is not None:
+            name_a, name_b = vs
         elif " " in rest.strip():
             tokens = rest.strip().rsplit(" ", 1)
-            if len(tokens) == 2:
-                name_a, name_b = tokens[0].strip(), tokens[1].strip()
-            else:
-                await ctx.send("Usage: !h2h <botA> vs <botB> [mode|overall|standard|solo]")
-                return
+            name_a, name_b = tokens[0].strip(), tokens[1].strip()
         else:
             await ctx.send("Usage: !h2h <botA> vs <botB> [mode|overall|standard|solo]")
             return
@@ -399,8 +417,8 @@ class ChatCommands(commands.Component):
         modes_to_check = [mode] if mode else ALL_MODES
         parts = []
         for m in modes_to_check:
-            w, l, d = self.bot._db.get_bot_record(bot.id, m)
-            total = w + l + d
+            w, l, _d = self.bot._db.get_bot_record(bot.id, m)
+            total = w + l  # draws don't count towards win rate
             if total == 0:
                 continue
             pct = round(100 * w / total)
@@ -608,10 +626,8 @@ class ChatCommands(commands.Component):
                 mode_group = _MODE_GROUPS[keyword]
 
         # Parse bot names
-        if " vs " in rest.lower():
-            sep = " vs " if " vs " in rest else " VS "
-            parts = rest.split(sep, 1)
-            name_a, name_b = parts[0].strip(), parts[1].strip()
+        if (vs := split_vs(rest)) is not None:
+            name_a, name_b = vs
         elif " " in rest.strip():
             tokens = rest.strip().rsplit(" ", 1)
             name_a, name_b = tokens[0].strip(), tokens[1].strip()
@@ -684,16 +700,16 @@ class ChatCommands(commands.Component):
     @commands.command(name="predict")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_predict(self, ctx: commands.Context, *, args: str = "") -> None:
-        """!predict [<team1> vs <team2> [mode]] — win probability.
+        """!predict <team1> vs <team2> <mode> | !predict current — win probability.
 
-        No args = current match. Teams can be comma-separated for solo modes.
-        You can also use raw MMR values:
-          !predict Nexto vs Necto
-          !predict A, B vs C, D
+        Teams can be comma-separated (e.g. for solo modes).  A mode is
+        required for bot names; raw MMR values need none:
+          !predict Nexto vs Necto 1v1
+          !predict A, B vs C, D solo2v2
           !predict 1500 vs 1200
         """
         if not args or self._is_help(args):
-            await ctx.send("Usage: !predict <team1> vs <team2> [mode] or !predict current")
+            await ctx.send("Usage: !predict <team1> vs <team2> <mode> or !predict current")
             return
 
         # "current" keyword: show prediction for current live match
@@ -721,19 +737,18 @@ class ChatCommands(commands.Component):
         rest, mode = self._split_name_and_mode(args)
 
         # Split on " vs "
-        if " vs " not in rest.lower():
-            await ctx.send("Usage: !predict <team1> vs <team2> [mode]")
+        vs = split_vs(rest)
+        if vs is None:
+            await ctx.send("Usage: !predict <team1> vs <team2> <mode>")
             return
-
-        sep = " vs " if " vs " in rest else " VS "
-        left_str, right_str = rest.split(sep, 1)
+        left_str, right_str = vs
 
         # Parse comma-separated entries per side
         left_entries = [n.strip() for n in left_str.split(",") if n.strip()]
         right_entries = [n.strip() for n in right_str.split(",") if n.strip()]
 
         if not left_entries or not right_entries:
-            await ctx.send("Usage: !predict <team1> vs <team2> [mode]")
+            await ctx.send("Usage: !predict <team1> vs <team2> <mode>")
             return
 
         # Check if all entries are numeric (raw MMR mode)
@@ -759,7 +774,11 @@ class ChatCommands(commands.Component):
             await ctx.send(f"🔮 MMR {left_label} {p_left}% — {p_right}% {right_label}")
             return
 
-        # Bot name mode — resolve all bots
+        # Bot names — ratings are per mode, so the mode must be explicit
+        if not mode:
+            await ctx.send(f"Please add a mode, e.g. !predict A vs B 1v1 — modes: {MODES_HINT}")
+            return
+
         left_bots = []
         for name in left_entries:
             bot, err = self._find_bot(name)
@@ -776,18 +795,13 @@ class ChatCommands(commands.Component):
                 return
             right_bots.append(bot)
 
-        # Auto-detect mode from team size if not specified
-        team_size = max(len(left_bots), len(right_bots))
-        is_solo = len(set(b.id for b in left_bots)) > 1 or len(set(b.id for b in right_bots)) > 1
-        if not mode:
-            if team_size == 1:
-                mode = "1v1"
-            elif team_size == 2:
-                mode = "solo_2v2" if is_solo else "2v2"
-            elif team_size >= 3:
-                mode = "solo_3v3" if is_solo else "3v3"
-            else:
-                mode = "1v1"
+        # Different bots on one team contribute independently (solo-queue
+        # style); identical teammates are deduplicated.
+        is_solo = (
+            mode.startswith("solo_")
+            or len(set(b.id for b in left_bots)) > 1
+            or len(set(b.id for b in right_bots)) > 1
+        )
 
         from rlgymstream.matchmaking.ratings import predict_win_probability
         left_ids = [b.id for b in left_bots]
@@ -879,16 +893,19 @@ class ChatCommands(commands.Component):
     @commands.command(name="stats")
     @commands.cooldown(rate=1, per=5, key=commands.BucketType.chatter)
     async def cmd_stats(self, ctx: commands.Context, *, args: str = "") -> None:
-        """!stats [top|bottom|bot] <stat|bot> [mode]
+        """!stats [top|bottom|bot] <stat|bot> <mode>
 
-        !stats top <stat> [mode]   — top 5 bots by a stat
-        !stats bottom <stat> [mode] — bottom 5 bots by a stat
-        !stats bot <name> [mode]   — average stats for a specific bot
-        !stats <stat> [mode]       — shortcut for !stats top <stat> [mode]
+        !stats top <stat> <mode>    — top 5 bots by a stat
+        !stats bottom <stat> <mode> — bottom 5 bots by a stat
+        !stats bot <name> <mode>    — average stats for a specific bot
+        !stats <stat> <mode>        — shortcut for !stats top <stat> <mode>
+
+        Averages are per player slot (a bot filling 3 slots in a 3v3
+        contributes 3 samples per match).
         """
         if not args or self._is_help(args):
             await ctx.send(
-                "Usage: !stats top/bottom <stat> [mode] | !stats bot <name> [mode] — "
+                "Usage: !stats top/bottom <stat> <mode> | !stats bot <name> <mode> — "
                 "Stats: goals, assists, saves, shots, demos, boost, speed, supersonic, bpm, air, wall, ground"
             )
             return
@@ -907,43 +924,42 @@ class ChatCommands(commands.Component):
             await self._stats_leaders(ctx, args, ascending=False)
 
     async def _stats_leaders(self, ctx: commands.Context, args: str, ascending: bool) -> None:
-        """Handle !stats top/bottom <stat> [mode]."""
+        """Handle !stats top/bottom <stat> <mode>."""
         if not args:
-            await ctx.send("Please specify a stat. Try: goals, demos, boost, speed, supersonic, bpm, saves, etc.")
+            await ctx.send("Please specify a stat and mode, e.g. !stats top goals 1v1")
             return
 
-        tokens = args.strip().split()
-        stat_name = tokens[0].lower()
-        mode_arg = tokens[1] if len(tokens) > 1 else None
-        mode = self._resolve_mode(mode_arg)
-        if mode_arg and not mode:
-            stat_name = args.strip().lower()
-            mode = None
-
-        col = self._STAT_ALIASES.get(stat_name)
+        stat_part, mode = self._split_name_and_mode(args)
+        col = self._STAT_ALIASES.get(stat_part.lower())
         if not col:
-            await ctx.send(f'Unknown stat "{tokens[0]}". Try: goals, demos, boost, speed, supersonic, bpm, saves, etc.')
+            await ctx.send(f'Unknown stat "{stat_part}". Try: goals, demos, boost, speed, supersonic, bpm, saves, etc.')
+            return
+        if not mode:
+            await ctx.send(f"Please add a mode, e.g. !stats top {stat_part} 1v1 — modes: {MODES_HINT}")
             return
 
         leaders = self.bot._db.get_stat_leaders(col, mode=mode, limit=5, min_matches=5, ascending=ascending)
         if not leaders:
-            await ctx.send(f"No data yet for stat \"{tokens[0]}\".")
+            await ctx.send(f'No data yet for "{stat_part}" in {MODE_DISPLAY[mode]}.')
             return
 
         units = self._stat_units(col)
         label = "Bottom" if ascending else "Top"
-        display_stat = tokens[0].capitalize()
-        mode_str = f" ({mode})" if mode else ""
+        display_stat = stat_part.capitalize()
+        mode_str = f" ({MODE_DISPLAY[mode]})"
         parts = [f"{i+1}. {r['bot_name']} ({r['value']}{units})" for i, r in enumerate(leaders)]
         await ctx.send(f"🏆 {label} {display_stat}{mode_str}: {' | '.join(parts)}")
 
     async def _stats_bot(self, ctx: commands.Context, args: str) -> None:
-        """Handle !stats bot <name> [mode]."""
+        """Handle !stats bot <name> <mode>."""
         if not args:
-            await ctx.send("Usage: !stats bot <bot name> [mode]")
+            await ctx.send("Usage: !stats bot <bot name> <mode>")
             return
 
         name, mode = self._split_name_and_mode(args)
+        if not mode:
+            await ctx.send(f"Please add a mode, e.g. !stats bot {name} 1v1 — modes: {MODES_HINT}")
+            return
         bot, err = self._find_bot(name)
         if not bot:
             await ctx.send(err)
@@ -952,11 +968,10 @@ class ChatCommands(commands.Component):
 
         stats = self.bot._db.get_bot_avg_stats(bot.id, mode=mode)
         if not stats:
-            mode_str = f" in {mode}" if mode else ""
-            await ctx.send(f"No stats recorded for {bot.name}{mode_str}.")
+            await ctx.send(f"No stats recorded for {bot.name} in {MODE_DISPLAY[mode]}.")
             return
 
-        mode_str = f" ({mode})" if mode else ""
+        mode_str = f" ({MODE_DISPLAY[mode]})"
         n = stats["matches"]
         msg = (
             f"📊 {bot.name}{mode_str} avg over {n} matches: "
@@ -972,6 +987,14 @@ class ChatCommands(commands.Component):
 
 # ── Bot class ────────────────────────────────────────────────────────
 
+# Chat watchdog: twitchio can permanently close the EventSub websocket (e.g.
+# a reconnect that times out, or a failed resubscribe) while the process keeps
+# running, leaving the bot deaf.  If the chat subscription stays missing for
+# this many consecutive checks, the bot shuts down so the parent process
+# restarts it.
+_WATCHDOG_INTERVAL = 30.0  # seconds
+_WATCHDOG_MAX_FAILURES = 3
+
 
 class RLGymStreamBot(commands.Bot):
     """Twitch chatbot for RLGymStream using twitchio v3."""
@@ -981,6 +1004,9 @@ class RLGymStreamBot(commands.Bot):
         self._overlay = overlay_state
         self._config = config
         self._start_time = time.monotonic()
+        self._watchdog_task: asyncio.Task | None = None
+        # Set when the watchdog shuts the bot down because chat was lost.
+        self.chat_lost = False
 
         super().__init__(
             client_id=config.twitch_client_id,
@@ -1041,7 +1067,57 @@ class RLGymStreamBot(commands.Bot):
             except Exception as e:
                 logger.warning("Failed to subscribe to own chat: %s", e)
 
+        self._watchdog_task = asyncio.create_task(self._chat_watchdog())
         logger.info("Twitch chatbot setup complete")
+
+    def _has_chat_subscription(self) -> bool:
+        return any(
+            getattr(sub.type, "value", sub.type) == "channel.chat.message"
+            for sub in self.websocket_subscriptions().values()
+        )
+
+    async def _chat_watchdog(self) -> None:
+        """Shut down if the chat subscription disappears and doesn't come back."""
+        seen_healthy = False
+        failures = 0
+        while True:
+            await asyncio.sleep(_WATCHDOG_INTERVAL)
+            try:
+                healthy = self._has_chat_subscription()
+            except Exception:
+                logger.warning("Chat watchdog check failed", exc_info=True)
+                healthy = False
+
+            if healthy:
+                if failures:
+                    logger.info("Chat subscription is back")
+                seen_healthy = True
+                failures = 0
+                continue
+            if not seen_healthy:
+                continue  # never subscribed yet (e.g. waiting for OAuth)
+
+            failures += 1
+            logger.warning(
+                "No active chat subscription (check %d/%d)",
+                failures, _WATCHDOG_MAX_FAILURES,
+            )
+            if failures >= _WATCHDOG_MAX_FAILURES:
+                logger.error("Chat subscription lost — shutting down so the chatbot is restarted")
+                self.chat_lost = True
+                await self.close()
+                return
+
+    async def close(self, **options) -> None:
+        task = self._watchdog_task
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+        await super().close(**options)
+
+    async def event_websocket_closed(self, payload) -> None:
+        # Also fires for routine reconnects; the watchdog decides whether
+        # chat is actually gone.
+        logger.info("EventSub websocket closed: %s", payload.socket)
 
     async def event_ready(self) -> None:
         logger.info("Twitch chatbot logged in as: %s", self.user)

@@ -100,7 +100,11 @@ def pick_match(
 
 # Maximum p*(1-p) is 0.25 (when p=0.5).  Used to normalise accept probability.
 _MAX_WEIGHT = 0.25
-_MAX_RETRIES = 1000
+# Solo queue: thresholds are squared every _RELAX_EVERY failed attempts
+# (e.g. 0.99 → ~0.00003 after 10 squarings).  If no matchup is accepted
+# within _MAX_RETRIES, a simple valid fallback matchup is used.
+_RELAX_EVERY = 1000
+_MAX_RETRIES = 20_000
 
 
 def _standard_pick(
@@ -294,7 +298,7 @@ def _solo_queue_pick(
     threshold = random.random()
     teammate_threshold = random.random()
     for attempt in range(_MAX_RETRIES):
-        if attempt > 0 and attempt % 1000 == 0:
+        if attempt > 0 and attempt % _RELAX_EVERY == 0:
             threshold *= threshold
             teammate_threshold *= teammate_threshold
 
@@ -331,18 +335,18 @@ def _solo_queue_pick(
                 map_name=map_name,
             )
 
-    # Fallback: accept the last generated matchup
+    # Fallback (should be unreachable): two distinct bots, one per team, so
+    # the teams can never be identical.
+    logger.warning("Solo queue matchmaking exhausted %d attempts; using fallback", _MAX_RETRIES)
+    a, b = random.sample(bots, 2)
     return MatchSetup(
         mode=mode,
-        team_blue=blue,
-        team_orange=orange,
+        team_blue=[a] * team_size,
+        team_orange=[b] * team_size,
         map_name=map_name,
     )
 
 
-def pick_mode(
-        rotation: list[MatchMode],
-        counter: int,
-) -> MatchMode:
+def pick_mode(rotation: list[MatchMode]) -> MatchMode:
     """Randomly select a mode from the rotation."""
     return random.choice(rotation)

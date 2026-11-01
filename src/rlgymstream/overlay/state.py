@@ -27,6 +27,7 @@ class OverlayBotInfo:
     losses: int = 0
     logo_path: str | None = None
     anchored: bool = False
+    rlbot_botpack: bool = False
 
 
 @dataclass
@@ -57,6 +58,7 @@ class OverlayLeaderboardEntry:
     sigma: float = 0.0
     matches_played: int = 0
     anchored: bool = False
+    rlbot_botpack: bool = False
 
 
 @dataclass

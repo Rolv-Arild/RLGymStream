@@ -27,6 +27,10 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 #
 # If "bots" is omitted, every *bot.toml file under "path" is discovered
 # recursively. Use "exclude" to skip certain folder names.
+#
+# Set "rlbot_botpack = true" on a source that is the public RLBot botpack.
+# Its bots get the RLBot icon on the overlay, telling viewers they can
+# download and play against them locally.
 
 # Example: explicitly list bots
 # [[bot_sources]]
@@ -40,6 +44,12 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 # [[bot_sources]]
 # path = "/path/to/community-bots"
 # exclude = ["broken_bot", "deprecated"]
+
+# Example: bots from the RLBot botpack installed by the RLBot app
+# [[bot_sources]]
+# path = "C:/Users/<you>/AppData/Local/RLBot5/bots/bob_build_x86_64-windows"
+# bots = ["Nexto/bot.toml", "Necto/bot.toml"]
+# rlbot_botpack = true
 
 # ── Anchored Ratings ─────────────────────────────────────────────────
 # Fix a bot's mu and sigma so they never change. The bot still

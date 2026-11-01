@@ -43,7 +43,7 @@ def discover_bots(sources: list[BotSource], db: Database) -> list[Bot]:
         toml_paths = _collect_toml_paths(root, source)
         for toml_path in toml_paths:
             try:
-                bot = _register_bot(toml_path, db)
+                bot = _register_bot(toml_path, db, rlbot_botpack=source.rlbot_botpack)
                 found_names.add(bot.name)
             except Exception:
                 logger.warning("Skipping invalid bot config: %s", toml_path, exc_info=True)
@@ -89,7 +89,7 @@ def _collect_toml_paths(root: Path, source: BotSource) -> list[Path]:
         return paths
 
 
-def _register_bot(toml_path: Path, db: Database) -> Bot:
+def _register_bot(toml_path: Path, db: Database, rlbot_botpack: bool = False) -> Bot:
     """Validate a single bot.toml with RLBot's parser, extract metadata
     including mode tags, then upsert into the DB.  Returns the Bot."""
     abs_path = toml_path.resolve()
@@ -140,6 +140,7 @@ def _register_bot(toml_path: Path, db: Database) -> Bot:
         language=language,
         supported_modes=supported_modes,
         enabled=True,
+        rlbot_botpack=rlbot_botpack,
     )
     db.upsert_bot(bot)
     mode_info = supported_modes or "all modes"

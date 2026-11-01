@@ -11,7 +11,7 @@ Usage:
     python scripts/recalculate_ratings.py --dry-run    # preview changes without modifying
 """
 
-import shutil
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -103,11 +103,19 @@ def main():
         bots = {b.id: b.name for b in db_orig.get_all_bots(enabled_only=False)}
         old_ratings = _get_all_ratings(db_orig)
 
-        # Copy database to temp file and replay there
+        # Copy database to temp file and replay there.  Use SQLite's backup
+        # API rather than a file copy so changes still in the -wal file
+        # (e.g. while the stream is running) are included.
         tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         tmp.close()
         tmp_path = Path(tmp.name)
-        shutil.copy2(db_path, tmp_path)
+        src = sqlite3.connect(db_path)
+        dst = sqlite3.connect(tmp_path)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
 
         try:
             db_tmp = Database(tmp_path)

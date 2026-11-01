@@ -87,6 +87,11 @@ Each `[[bot_sources]]` entry points at a directory (typically a cloned repo).
 - If **`bots` is omitted**, every file matching `*bot.toml` under `path` is
   discovered recursively.
   Use **`exclude`** to skip folder names (matched with `fnmatch` against the relative path).
+- Set **`rlbot_botpack = true`** on a source that is the public
+  [RLBot botpack](https://github.com/RLBot/botpack) (the RLBot app installs it
+  in `%LOCALAPPDATA%\RLBot5\bots\bob_build_x86_64-windows`). Its bots get an
+  RLBot icon next to their name on the overlay, so viewers know they can play
+  them locally.
 
 Every discovered config is validated with `rlbot.config.load_player_config`.
 Invalid configs are skipped with a warning.
@@ -158,11 +163,12 @@ main process must be up).
 |---|---|
 | `!help` | List available commands |
 | `!mmr <bot>` | Show a bot's MMR across all modes |
-| `!lb [mode]` | Top 5 leaderboard (default: 1v1). Modes: `1v1`, `2s`, `3v3`, `solo2v2`, etc. |
+| `!lb <mode>` | Top 5 leaderboard for a mode. Modes: `1v1`, `2s`, `3v3`, `solo2v2`, etc. |
 | `!match` | Current match info (teams, score, phase) |
 | `!h2h <botA> vs <botB>` | Head-to-head win/loss record |
 | `!bot <name>` | Bot info — author, description, overall record |
-| `!stats` | Total matches played, number of active bots |
+| `!stats top <stat> <mode>` | Top 5 bots by an average stat in a mode |
+| `!info` | Total matches played, number of active bots |
 | `!winrate <bot>` | Win rate per mode |
 
 Bot names are matched case-insensitively with fuzzy "did you mean?" suggestions.
@@ -258,8 +264,9 @@ Uses [OpenSkill](https://openskill.me/en/stable/) with the
 - In standard modes, teams are deduplicated for rating (same bot × N → one update)
 - Bots appearing on both teams in solo queue have their posteriors consolidated
   using **precision-based merging** (sum μ deltas, sum 1/σ² deltas from the prior)
-- **Draws are skipped** — no rating change (draws shouldn't occur in normal
-  Rocket League play and likely indicate an error)
+- **Only completed matches count** — if a match errors out or ends tied
+  (which can't happen in normal Rocket League play), it is discarded: not
+  saved, not rated
 - Win probability prediction via `model.predict_win()`
 - **Anchored ratings** — bots can be fixed at a known μ/σ (e.g. from
   human calibration) via `[[anchored_ratings]]` in the config.  They still
@@ -269,13 +276,20 @@ Uses [OpenSkill](https://openskill.me/en/stable/) with the
 
 ## Matchmaking
 
-A random threshold is rolled once per match, then random matchups are
-generated until one has `p × (1 − p) / 0.25 ≥ threshold` (where `p` is
-the predicted win probability for one side).  This favours balanced
-matchups while allowing occasional mismatches for variety.  Every 1000
-failed attempts the threshold is squared to guarantee convergence.
+**Standard modes** (1v1, 2v2, 3v3) use temperature-controlled active
+learning.  For every pair of bots, a Beta distribution is built from the
+OpenSkill win prediction (weighted by `matchmaker_n_prior`) plus their
+head-to-head record.  Each pair is picked with probability proportional to
+`variance ^ (1 / matchmaker_temperature)`, so matchups whose outcome is
+still uncertain are favoured.  Lower temperature = greedier.
 
-With `sigma_priority_chance` probability, an additional constraint is added:
-the matchup must also include the bot with the highest σ (most uncertain
-rating) in the current mode.  This helps new or under-played bots get
-calibrated faster without biasing which opponent they face.
+**Solo queue** uses accept/reject sampling.  A random threshold is rolled
+once per match, then random matchups are generated until one has
+`p × (1 − p) / 0.25 ≥ threshold` (where `p` is the predicted win
+probability for one side).  A second threshold limits skill gaps between
+teammates.  Every 1000 failed attempts both thresholds are squared to
+guarantee convergence.
+
+In both, with `sigma_priority_chance` probability the matchup must include
+the non-anchored bot with the highest σ (most uncertain rating) in the
+current mode.  This helps new or under-played bots get calibrated faster.

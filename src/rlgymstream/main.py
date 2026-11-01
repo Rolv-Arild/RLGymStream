@@ -158,9 +158,9 @@ async def run(config: AppConfig) -> None:
             "Twitch chatbot disabled (need twitch channel, client_id, and client_secret)"
         )
 
-    # Match loop — resume counter from database
-    match_counter = db.get_match_count()
-    logger.info("Resuming from match #%d", match_counter)
+    # Match loop — match numbers follow the number of recorded matches, so
+    # discarded (incomplete) matches don't create gaps.
+    logger.info("Resuming after %d recorded matches", db.get_match_count())
     last_map: str | None = None
     try:
         # Show leaderboard at startup before the first match
@@ -171,7 +171,7 @@ async def run(config: AppConfig) -> None:
         while not stop_event.is_set():
 
             # Pick mode
-            mode = pick_mode(config.mode_rotation, match_counter)
+            mode = pick_mode(config.mode_rotation)
 
             # Matchmake
             setup = pick_match(db, mode, last_map=last_map,
@@ -186,11 +186,10 @@ async def run(config: AppConfig) -> None:
                     mode.min_bots_required,
                     len(bots),
                 )
-                match_counter += 1
                 await _sleep_or_stop(5, stop_event)
                 continue
 
-            match_counter += 1
+            match_counter = db.get_match_count() + 1
             last_map = setup.map_name
             logger.info("="*60)
             logger.info("MATCH #%d – %s", match_counter, mode.display_name)
@@ -242,6 +241,18 @@ async def run(config: AppConfig) -> None:
                 overlay_state.update_match(match_state)
 
             result = await launcher.run_match(setup, on_phase_change=_on_phase)
+
+            if not result.completed:
+                # Only matches that played through to the end count —
+                # don't save, rate, or show a post-match screen.
+                logger.warning(
+                    "Match #%d did not complete (%d-%d) — discarding",
+                    match_counter, result.score_blue, result.score_orange,
+                )
+                overlay_state.set_post_match_stats(None)
+                overlay_state.update_match(OverlayMatchState(phase="idle"))
+                await _sleep_or_stop(config.leaderboard_delay, stop_event)
+                continue
 
             logger.info(
                 "Result: Blue %d – %d Orange → %s",
@@ -431,25 +442,17 @@ async def run(config: AppConfig) -> None:
 
 
 def _stats_api_player_names(setup: MatchSetup) -> set[str]:
-    """Build the set of player names as the Stats API would report them.
-
-    The Stats API client keys players as "team_num:name" where name includes
-    any per-team duplicate suffix from RLBot (e.g. "BotName (2)").
-    We replicate that here by counting across both teams (blue first, then orange).
-    """
-    counts: dict[str, int] = {}
-    names: set[str] = set()
-    for team_num, team in ((0, setup.team_blue), (1, setup.team_orange)):
-        for bot in team:
-            counts[bot.name] = counts.get(bot.name, 0) + 1
-            n = counts[bot.name]
-            api_name = bot.name if n == 1 else f"{bot.name} ({n})"
-            names.add(f"{team_num}:{api_name}")
-    return names
+    """Set of Stats API player keys ("team:name") for the bots in *setup*."""
+    return set(_stats_api_name_to_bot_id(setup))
 
 
 def _stats_api_name_to_bot_id(setup: MatchSetup) -> dict[str, int | None]:
-    """Map Stats API player keys (team:name with global duplicate suffixes) to bot IDs."""
+    """Map Stats API player keys to bot IDs.
+
+    The Stats API client keys players as "team_num:name".  RLBot numbers
+    duplicate names globally across both teams (blue first, then orange):
+    "Bot", "Bot (2)", "Bot (3)", ...
+    """
     counts: dict[str, int] = {}
     mapping: dict[str, int | None] = {}
     for team_num, team in ((0, setup.team_blue), (1, setup.team_orange)):
@@ -489,6 +492,7 @@ def _build_match_state(
             losses=losses,
             logo_path=bot.logo_path,
             anchored=bot.id in _anchored,
+            rlbot_botpack=bot.rlbot_botpack,
         )
 
     return OverlayMatchState(
@@ -523,6 +527,7 @@ def _refresh_leaderboards(
                 sigma=entry["sigma"],
                 matches_played=entry["rating"].matches_played,
                 anchored=entry["bot"].id in mode_anchored,
+                rlbot_botpack=entry["bot"].rlbot_botpack,
             )
             for i, entry in enumerate(lb)
         ]

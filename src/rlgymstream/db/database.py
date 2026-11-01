@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS bots (
     fun_fact TEXT NOT NULL DEFAULT '',
     language TEXT NOT NULL DEFAULT '',
     supported_modes TEXT NOT NULL DEFAULT '',
-    enabled INTEGER NOT NULL DEFAULT 1
+    enabled INTEGER NOT NULL DEFAULT 1,
+    rlbot_botpack INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS ratings (
@@ -109,6 +110,10 @@ class Database:
         with self._conn() as conn:
             conn.executescript(_SCHEMA)
             # Migrate existing databases: add columns that may not exist yet
+            bot_cols = {row[1] for row in conn.execute("PRAGMA table_info(bots)").fetchall()}
+            if "rlbot_botpack" not in bot_cols:
+                conn.execute("ALTER TABLE bots ADD COLUMN rlbot_botpack INTEGER NOT NULL DEFAULT 0")
+
             existing = {row[1] for row in conn.execute("PRAGMA table_info(match_player_stats)").fetchall()}
             migrations = [
                 ("car_touches", "INTEGER NOT NULL DEFAULT 0"),
@@ -132,8 +137,8 @@ class Database:
     def upsert_bot(self, bot: Bot) -> Bot:
         with self._conn() as conn:
             cur = conn.execute(
-                """INSERT INTO bots (name, author, config_path, logo_path, description, fun_fact, language, supported_modes, enabled)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """INSERT INTO bots (name, author, config_path, logo_path, description, fun_fact, language, supported_modes, enabled, rlbot_botpack)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(name) DO UPDATE SET
                        author=excluded.author,
                        config_path=excluded.config_path,
@@ -142,11 +147,12 @@ class Database:
                        fun_fact=excluded.fun_fact,
                        language=excluded.language,
                        supported_modes=excluded.supported_modes,
-                       enabled=excluded.enabled
+                       enabled=excluded.enabled,
+                       rlbot_botpack=excluded.rlbot_botpack
                    RETURNING id""",
                 (bot.name, bot.author, bot.config_path, bot.logo_path,
                  bot.description, bot.fun_fact, bot.language,
-                 bot.supported_modes, int(bot.enabled)),
+                 bot.supported_modes, int(bot.enabled), int(bot.rlbot_botpack)),
             )
             bot.id = cur.fetchone()[0]
         return bot
@@ -363,7 +369,7 @@ class Database:
         order = "ASC" if ascending else "DESC"
         with self._conn() as conn:
             q = f"""
-                SELECT b.name, AVG(mps.{stat}) as val, COUNT(*) as n
+                SELECT b.name, AVG(mps.{stat}) as val, COUNT(DISTINCT mps.match_id) as n
                 FROM match_player_stats mps
                 JOIN bots b ON mps.bot_id = b.id
                 JOIN matches m ON mps.match_id = m.id
@@ -380,14 +386,29 @@ class Database:
 
     def get_bot_avg_stats(self, bot_id: int, mode: str | None = None,
                           limit: int | None = None) -> dict | None:
-        """Return averaged post-game stats for a bot across recent matches.
+        """Return averaged post-game stats for a bot.
+
+        Averages are per player slot (a bot filling 3 slots in a 3v3
+        contributes 3 rows per match).  ``matches`` is the number of
+        distinct matches.  If *limit* is given, only the bot's *limit* most
+        recent matches (in *mode*, if given) are included.
 
         Returns None if no stats exist.
         """
+        mode_filter = " AND m.mode = ?" if mode else ""
         with self._conn() as conn:
-            q = """
+            q = f"""
+                WITH bot_rows AS (
+                    SELECT mps.* FROM match_player_stats mps
+                    JOIN matches m ON mps.match_id = m.id
+                    WHERE mps.bot_id = ?{mode_filter}
+                ),
+                recent AS (
+                    SELECT DISTINCT match_id FROM bot_rows
+                    ORDER BY match_id DESC LIMIT ?
+                )
                 SELECT
-                    COUNT(*) as n,
+                    COUNT(DISTINCT mps.match_id) as n,
                     AVG(mps.score) as avg_score,
                     AVG(mps.goals) as avg_goals,
                     AVG(mps.shots) as avg_shots,
@@ -405,21 +426,13 @@ class Database:
                     AVG(mps.pct_wall) as avg_pct_wall,
                     AVG(mps.pct_air) as avg_pct_air,
                     AVG(mps.pct_demolished) as avg_pct_demolished
-                FROM match_player_stats mps
-                JOIN matches m ON mps.match_id = m.id
-                WHERE mps.bot_id = ?
+                FROM bot_rows mps
+                WHERE mps.match_id IN (SELECT match_id FROM recent)
             """
             params: list = [bot_id]
             if mode:
-                q += " AND m.mode = ?"
                 params.append(mode)
-            if limit:
-                # Average over only the N most recent matches
-                q = q.replace(
-                    "FROM match_player_stats mps",
-                    "FROM (SELECT * FROM match_player_stats WHERE bot_id = ? ORDER BY match_id DESC LIMIT ?) mps",
-                )
-                params = [bot_id, limit] + params[1:]  # bot_id + limit first, then mode
+            params.append(limit if limit else -1)  # LIMIT -1 = no limit in SQLite
             row = conn.execute(q, params).fetchone()
             if not row or row["n"] == 0:
                 return None
@@ -523,6 +536,7 @@ def _row_to_bot(row: sqlite3.Row) -> Bot:
         description=row["description"], fun_fact=row["fun_fact"],
         language=row["language"], supported_modes=row["supported_modes"],
         enabled=bool(row["enabled"]),
+        rlbot_botpack=bool(row["rlbot_botpack"]),
     )
 
 

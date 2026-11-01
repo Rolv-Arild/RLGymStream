@@ -34,8 +34,11 @@ _PHASE_MAP = {
 class MatchResult:
     score_blue: int = 0
     score_orange: int = 0
-    winner: str = ""  # "blue", "orange", "draw"
+    winner: str = ""  # "blue" or "orange" (empty if not completed)
     duration_seconds: float = 0.0
+    # True only if the match reached a real end (Ended phase with a winner,
+    # or the mercy rule).  Incomplete matches must not be recorded.
+    completed: bool = False
 
 
 # Callback type: (overlay_phase, score_blue, score_orange) → None
@@ -162,6 +165,7 @@ class MatchLauncher:
                             final_result.winner = "blue"
                         else:
                             final_result.winner = "orange"
+                        final_result.completed = True
                         try:
                             manager.stop_match()
                         except Exception:
@@ -184,10 +188,15 @@ class MatchLauncher:
                         final_result.duration_seconds = time.monotonic() - start_time
                         if score_blue > score_orange:
                             final_result.winner = "blue"
+                            final_result.completed = True
                         elif score_orange > score_blue:
                             final_result.winner = "orange"
+                            final_result.completed = True
                         else:
-                            final_result.winner = "draw"
+                            # A tied Soccar match can't legitimately end —
+                            # treat it as incomplete.
+                            logger.warning("Match ended tied %d-%d; treating as incomplete",
+                                           score_blue, score_orange)
 
                         loop.call_soon_threadsafe(game_finished.set)
                         return
@@ -196,7 +205,7 @@ class MatchLauncher:
 
             except Exception:
                 logger.exception("Error inside match thread")
-                final_result.winner = "draw"
+                final_result.completed = False
                 final_result.duration_seconds = time.monotonic() - start_time
                 loop.call_soon_threadsafe(game_finished.set)
 

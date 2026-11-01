@@ -31,6 +31,19 @@
         .badge-delta-pos { font-size: 14px; color: #4ade80; font-weight: 600; margin-left: 4px; }
         .badge-delta-neg { font-size: 14px; color: #f87171; font-weight: 600; margin-left: 4px; }
         .anchored-icon { font-size: 0.65em; color: #94a3b8; margin-left: 4px; vertical-align: middle; cursor: default; }
+        /* Bot is in the public RLBot botpack (playable locally) */
+        .rlbot-icon {
+            display: inline-block;
+            flex-shrink: 0;
+            height: 1em;
+            width: auto;
+            margin-left: 6px;
+            vertical-align: middle;
+            filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.6));
+        }
+        .idle-lb-footer .rlbot-icon { height: 1.3em; margin: 0 2px 0 0; }
+        .idle-lb-name { display: flex; align-items: center; }
+        .idle-lb-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
         /* ── Boost bar ── */
         .boost-bar-container {
@@ -1009,7 +1022,7 @@ function botShowcase(bot, team, isSolo) {
         <div class="pre-bot-content">
             <div class="pre-bot-header">
                 <div>
-                    <div class="pre-bot-name">${escapeHtml(bot.name)}</div>
+                    <div class="pre-bot-name">${escapeHtml(bot.name)}${rlbotIcon(bot)}</div>
                     <div class="pre-bot-author">by ${escapeHtml(bot.author || "Unknown")} ${lang}</div>
                 </div>
                 <div class="pre-bot-mmr-box">
@@ -1065,7 +1078,7 @@ function _buildSingleBadge(bot, teamClass, deltaHtml, isPostgame, suffix, statsN
     const dataBotName = `${teamNum}:${statsName}`;
     const displayName = statsName;
     return `<div class="badge-card ${teamClass}" data-bot-name="${escapeHtml(dataBotName)}">
-        <div class="badge-name">${escapeHtml(displayName)}${suffix}</div>
+        <div class="badge-name">${escapeHtml(displayName)}${suffix}${rlbotIcon(bot)}</div>
         <div class="badge-mmr">${formatMMR(bot.mmr)}${deltaHtml}</div>
         <div class="badge-mmr-label">MMR</div>
         ${!isPostgame ? `
@@ -1311,6 +1324,11 @@ function renderIdleLeaderboard(state, el) {
     };
     const totalMatches = state.total_matches || 0;
 
+    const anyRlbot = modes.some(mk => (boards[mk] || []).some(e => e.rlbot_botpack));
+    const rlbotNote = anyRlbot
+        ? ` &ensp;·&ensp; <img class="rlbot-icon" src="/static/rlbot.svg" alt="RLBot"> in the RLBot botpack — play it yourself`
+        : "";
+
     const maxEntries = Math.max(...modes.map(mk => (boards[mk] || []).length));
     const availableHeight = 842;
     const rowHeight = 47;
@@ -1326,7 +1344,7 @@ function renderIdleLeaderboard(state, el) {
             return `<div class="idle-lb-row">
                 <div class="idle-lb-rank ${rc}">#${r}</div>
                 <div class="idle-lb-info">
-                    <div class="idle-lb-name">${escapeHtml(e.bot_name)}</div>
+                    <div class="idle-lb-name"><span class="idle-lb-name-text">${escapeHtml(e.bot_name)}</span>${rlbotIcon(e)}</div>
                     <div class="idle-lb-games">${e.matches_played} game${e.matches_played !== 1 ? "s" : ""}</div>
                 </div>
                 <div class="idle-lb-mmr">${anchorIcon(e)}${formatMMR(e.mmr)}</div>
@@ -1351,13 +1369,18 @@ function renderIdleLeaderboard(state, el) {
                 ${columns}
             </div>
             <div class="idle-lb-footer">
-                ${totalMatches} match${totalMatches !== 1 ? "es" : ""} played &ensp;·&ensp; Bot MMR — does not reflect actual in-game rank &ensp;·&ensp; Pinned ratings are based on estimates of human MMR
+                ${totalMatches} match${totalMatches !== 1 ? "es" : ""} played &ensp;·&ensp; Bot MMR — does not reflect actual in-game rank &ensp;·&ensp; Pinned ratings are based on estimates of human MMR${rlbotNote}
             </div>
         </div>`;
 }
 
 
 /* ── Utilities ─────────────────────────────────────────────── */
+function rlbotIcon(obj) {
+    return obj && obj.rlbot_botpack
+        ? '<img class="rlbot-icon" src="/static/rlbot.svg" alt="RLBot" title="In the RLBot botpack — playable locally">'
+        : "";
+}
 function anchorIcon(obj) {
     return obj && obj.anchored ? '<span class="anchored-icon" title="Anchored — rating does not change">📌&ensp;</span>' : "";
 }

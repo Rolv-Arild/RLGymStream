@@ -132,6 +132,7 @@ class OverlayStateProxy:
                         sigma=e.get("sigma", 0.0),
                         matches_played=e.get("matches_played", 0),
                         anchored=e.get("anchored", False),
+                        rlbot_botpack=e.get("rlbot_botpack", False),
                     )
                     for e in entries
                 ]
@@ -157,6 +158,7 @@ def _parse_bot_info(d: dict) -> OverlayBotInfo:
         losses=d.get("losses", 0),
         logo_path=d.get("logo_path"),
         anchored=d.get("anchored", False),
+        rlbot_botpack=d.get("rlbot_botpack", False),
     )
 
 

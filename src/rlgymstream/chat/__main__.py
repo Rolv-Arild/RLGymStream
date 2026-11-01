@@ -65,6 +65,7 @@ async def run_chatbot() -> None:
 
     logger.info("Chatbot starting for #%s (overlay: %s)", config.twitch_channel, overlay_url)
 
+    exit_code = 0
     try:
         async with chatbot:
             overlay_proxy.start(overlay_url)
@@ -78,13 +79,20 @@ async def run_chatbot() -> None:
                 )
 
             await chatbot.start(with_adapter=need_auth)
+            if chatbot.chat_lost:
+                exit_code = 1
     except KeyboardInterrupt:
         pass
     except Exception:
         logger.exception("Chatbot fatal error")
+        exit_code = 1
     finally:
         await overlay_proxy.stop()
-        logger.info("Chatbot process exiting")
+        logger.info("Chatbot process exiting (code %d)", exit_code)
+
+    # A non-zero exit makes the main process restart the chatbot.
+    if exit_code:
+        sys.exit(exit_code)
 
 
 def main() -> None:

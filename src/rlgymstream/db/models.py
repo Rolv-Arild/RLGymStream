@@ -18,6 +18,7 @@ class Bot:
     language: str = ""
     supported_modes: str = ""    # comma-separated: "1v1,2v2,3v3" (empty = all)
     enabled: bool = True
+    rlbot_botpack: bool = False  # from a source marked as the public RLBot botpack
 
     def supports_mode(self, mode: str) -> bool:
         """Check if this bot supports the given mode (e.g. '1v1', '2v2', '3v3').

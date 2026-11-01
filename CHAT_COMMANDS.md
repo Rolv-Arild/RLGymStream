@@ -30,7 +30,7 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 
 | Command | Description |
 |---|---|
-| `!lb [mode]` | Top 5 leaderboard (default: 1v1). Alias: `!leaderboard` |
+| `!lb <mode>` | Top 5 leaderboard for a mode. Alias: `!leaderboard` |
 | `!best [mode]` | Show the #1 bot per mode, or for a specific mode |
 
 ## Match Info
@@ -66,21 +66,23 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 
 | Command | Description |
 |---|---|
-| `!predict` | Win probability for the current live match |
-| `!predict current` | Same, explicitly |
-| `!predict <A> vs <B> [mode]` | Predict a 1v1 matchup (defaults to 1v1 mode) |
-| `!predict <A>, <B> vs <C>, <D>` | Predict a solo queue matchup (auto-detects mode from team size) |
-| `!predict <A>, <B>, <C> vs <D>, <E>, <F> [mode]` | Predict with explicit teams and mode |
-| `!predict <MMR> vs <MMR>` | Predict from raw MMR values (e.g. `!predict 1500 vs 1200`) |
+| `!predict current` | Win probability for the current live match |
+| `!predict <A> vs <B> <mode>` | Predict a matchup using the bots' ratings in that mode |
+| `!predict <A>, <B> vs <C>, <D> <mode>` | Predict with comma-separated teams (e.g. solo queue) |
+| `!predict <MMR> vs <MMR>` | Predict from raw MMR values (e.g. `!predict 1500 vs 1200`) — no mode needed |
 
 ## Bot Stats
 
 | Command | Description |
 |---|---|
-| `!stats top <stat> [mode]` | Top 5 bots ranked by a stat. Stats: goals, assists, saves, shots, demos, touches, score, boost, speed, supersonic, bpm, air, wall, ground |
-| `!stats bottom <stat> [mode]` | Bottom 5 bots by a stat |
-| `!stats bot <name> [mode]` | Show a bot's average match stats (goals, assists, saves, demos, shots, boost, BPM, speed, supersonic %, ground/wall/air %) |
-| `!stats <stat> [mode]` | Shortcut for `!stats top <stat> [mode]` |
+| `!stats top <stat> <mode>` | Top 5 bots ranked by a stat. Stats: goals, assists, saves, shots, demos, touches, score, boost, speed, supersonic, bpm, air, wall, ground |
+| `!stats bottom <stat> <mode>` | Bottom 5 bots by a stat |
+| `!stats bot <name> <mode>` | Show a bot's average match stats (goals, assists, saves, demos, shots, boost, BPM, speed, supersonic %, ground/wall/air %) |
+| `!stats <stat> <mode>` | Shortcut for `!stats top <stat> <mode>` |
+
+Stats are averaged **per player slot**: a bot filling all three slots of a 3v3
+team contributes three samples per match. Bots need at least 5 matches in the
+mode to appear in `!stats top`/`bottom`.
 
 ---
 
@@ -99,25 +101,24 @@ Mode shortcuts: `1v1`, `1s`, `ones`, `2v2`, `2s`, `twos`, `3v3`, `3s`, `threes`,
 !goals Nexto vs Necto
 !goals Nexto vs Necto 1v1
 !last 3 3v3
-!predict Nexto vs Necto
-!predict Nexto, Necto vs Ripple, Ordis
+!predict Nexto vs Necto 1v1
+!predict Nexto, Necto vs Ripple, Ordis solo2v2
 !predict 1500 vs 1200
 !predict A, B, C vs D, E, F solo3v3
 !bot Nexto 2v2
 !last 3 Nexto
 !last 2 1v1 Necto
-!stats demos
+!stats demos 3v3
 !stats top boost 1v1
-!stats bottom supersonic
-!stats bot Nexto
+!stats bottom supersonic 2s
 !stats bot Necto 2v2
 ```
 
 ## Notes
 
 - **Bot names** are matched case-insensitively with fuzzy "did you mean?" suggestions.
-- **Mode** is always optional and appears as the last argument. Without it, commands show data across all modes (or default to 1v1 for predictions).
-- **`!predict`** with no arguments shows the prediction for the current live match. With arguments, it computes a prediction from the bots' current ratings.
+- **Mode** appears as the last argument. `!lb`, `!stats` and `!predict` (with bot names) **require** a mode, since their numbers only make sense within one mode. Other commands show a per-mode breakdown when no mode is given.
+- **`!predict current`** shows the prediction for the current live match. With bot names, it computes a prediction from the bots' current ratings in the given mode.
 - **Cooldowns**: most commands have a 5-second per-user cooldown. `!info`, `!modes`, and `!uptime` have a 10-second per-channel cooldown.
 - **Help**: any command supports `help` as an argument to show usage (e.g. `!h2h help`, `!predict help`).
 
