@@ -236,6 +236,7 @@ async def run_game(
         existing_match_behavior=flat.ExistingMatchBehavior.Restart,
         enable_rendering=flat.DebugRendering.AlwaysOff,
         enable_state_setting=True,
+        wait_for_agents=True,
         auto_save_replay=True,
     )
 

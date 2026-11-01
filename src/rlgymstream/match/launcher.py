@@ -265,5 +265,6 @@ class MatchLauncher:
             enable_rendering=flat.DebugRendering.AlwaysOff,
             enable_state_setting=True,
             auto_save_replay=True,
+            wait_for_agents=True,
             performance_monitor=flat.PerformanceMonitor.NeverShow,
         )
