@@ -907,21 +907,22 @@ function _updateTicker(events, totalEventCount) {
         const div = document.createElement("div");
         const teamClass = evt.team_num === 0 ? "team-blue" : evt.team_num === 1 ? "team-orange" : "";
         const isGoal = evt.event_type === "goal";
+        const nameColor = evt.team_num === 0 ? "#60a5fa" : evt.team_num === 1 ? "#fb923c" : "#d1d5db";
 
         div.className = `ticker-event ${teamClass} ${isGoal ? "goal" : ""}`;
 
         if (isGoal) {
             const speedKmh = evt.details?.goal_speed_kmh || 0;
             const assist = evt.secondary ? ` <span class="ticker-detail">assisted by ${escapeHtml(evt.secondary)}</span>` : "";
-            div.innerHTML = `⚽ <span class="ticker-name">${escapeHtml(evt.primary)}</span> scored!${assist} <span class="ticker-detail">${speedKmh} kph</span>`;
+            div.innerHTML = `⚽ <span class="ticker-name" style="color:${nameColor}">${escapeHtml(evt.primary)}</span> scored!${assist} <span class="ticker-detail">${speedKmh} kph</span>`;
         } else if (evt.event_type === "statfeed") {
             const secondary = evt.secondary ? ` ${escapeHtml(evt.secondary)}` : "";
-            div.innerHTML = `<span class="ticker-name">${escapeHtml(evt.primary)}</span> — ${escapeHtml(evt.event_name)}${secondary}`;
+            div.innerHTML = `<span class="ticker-name" style="color:${nameColor}">${escapeHtml(evt.primary)}</span> — ${escapeHtml(evt.event_name)}${secondary}`;
         } else if (evt.event_type === "crossbar") {
-            const who = evt.primary ? ` <span class="ticker-detail">(${escapeHtml(evt.primary)})</span>` : "";
+            const who = evt.primary ? ` <span class="ticker-detail" style="color:${nameColor}">(${escapeHtml(evt.primary)})</span>` : "";
             div.innerHTML = `🔔 Crossbar hit!${who}`;
         } else {
-            div.innerHTML = `${escapeHtml(evt.event_name)} — <span class="ticker-name">${escapeHtml(evt.primary)}</span>`;
+            div.innerHTML = `${escapeHtml(evt.event_name)} — <span class="ticker-name" style="color:${nameColor}">${escapeHtml(evt.primary)}</span>`;
         }
 
         ticker.prepend(div);
