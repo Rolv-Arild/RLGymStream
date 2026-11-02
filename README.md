@@ -109,6 +109,14 @@ Recognised tags: `1v1`, `2v2`, `3v3`, `teamplay` (implies 2v2 + 3v3).
 Bots with no tags are assumed to support all modes.
 Bots only appear on leaderboards for modes they support.
 
+To change the tags of a bot you don't control, add an override to
+`rlgymstream.toml` (keyed by bot name; it replaces `[details].tags`):
+
+```toml
+[bot_overrides."Dice"]
+tags = ["1v1", "2v2"]
+```
+
 ### Environment variable overrides
 
 | Variable | Description |
@@ -188,6 +196,13 @@ This will:
 2. Scan all sources, validate each config with RLBot, register valid bots
 3. Start the overlay web server on `http://127.0.0.1:8080`
 4. Begin the automatic match loop (cycling randomly through configured modes)
+
+The stream starts the Twitch chatbot itself (and restarts it if it exits),
+so no separate chatbot process is needed.
+
+`python scripts/backup_db.py` copies the database to `data/backups/` with a
+timestamp, keeping the newest 30 (`--keep N` to change).  It's safe to run
+while the stream is writing.
 
 ## OBS Overlay Setup
 

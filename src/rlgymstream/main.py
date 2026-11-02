@@ -66,7 +66,7 @@ async def run(config: AppConfig) -> None:
     launcher = MatchLauncher(config)
 
     # Discover bots
-    bots = discover_bots(config.bot_sources, db)
+    bots = discover_bots(config.bot_sources, db, config.bot_overrides)
     logger.info("Found %d enabled bot(s)", len(bots))
     if not bots:
         logger.error(

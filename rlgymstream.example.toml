@@ -78,6 +78,16 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 # sigma = 2.5
 # modes = ["2v2", "3v3"]
 
+# ── Bot Overrides ────────────────────────────────────────────────────
+# Override metadata from a bot's bot.toml, keyed by bot name. Useful for
+# bots you don't control (e.g. the RLBot botpack). "tags" replaces
+# [details].tags, with the same vocabulary: "1v1", "2v2", "3v3", and
+# "teamplay" (2v2 + 3v3). No mode tags at all means every mode.
+# Restart to apply; overrides naming a missing bot log a warning.
+#
+# [bot_overrides."Dice"]
+# tags = ["1v1", "2v2"]
+
 # ── Twitch Chatbot ───────────────────────────────────────────────────
 # Connect a chatbot to Twitch chat that responds to viewer commands
 # like !mmr, !lb, !match, !h2h, !bot, !stats, !winrate.

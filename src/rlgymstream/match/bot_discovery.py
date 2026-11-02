@@ -13,7 +13,7 @@ from pathlib import Path
 
 from rlbot.config import load_player_config
 
-from rlgymstream.config import BotSource
+from rlgymstream.config import BotOverride, BotSource
 from rlgymstream.db.database import Database
 from rlgymstream.db.models import Bot
 
@@ -28,11 +28,17 @@ _TAG_TO_MODES = {
 }
 
 
-def discover_bots(sources: list[BotSource], db: Database) -> list[Bot]:
+def discover_bots(
+    sources: list[BotSource],
+    db: Database,
+    overrides: dict[str, BotOverride] | None = None,
+) -> list[Bot]:
     """Scan every *BotSource* for bot.toml files, validate them, and upsert
     into the DB.  Bots no longer present in any source are disabled.
+    *overrides* (bot name → BotOverride) replaces bot.toml metadata.
     Returns the full list of enabled bots after discovery.
     """
+    overrides = overrides or {}
     found_names: set[str] = set()
     for source in sources:
         root = source.path.resolve()
@@ -43,10 +49,15 @@ def discover_bots(sources: list[BotSource], db: Database) -> list[Bot]:
         toml_paths = _collect_toml_paths(root, source)
         for toml_path in toml_paths:
             try:
-                bot = _register_bot(toml_path, db, rlbot_botpack=source.rlbot_botpack)
+                bot = _register_bot(
+                    toml_path, db, rlbot_botpack=source.rlbot_botpack, overrides=overrides
+                )
                 found_names.add(bot.name)
             except Exception:
                 logger.warning("Skipping invalid bot config: %s", toml_path, exc_info=True)
+
+    for name in overrides.keys() - found_names:
+        logger.warning("Bot override names a bot that was not found: %s", name)
 
     # Disable bots that are no longer in any source
     all_bots = db.get_all_bots(enabled_only=False)
@@ -89,7 +100,12 @@ def _collect_toml_paths(root: Path, source: BotSource) -> list[Path]:
         return paths
 
 
-def _register_bot(toml_path: Path, db: Database, rlbot_botpack: bool = False) -> Bot:
+def _register_bot(
+    toml_path: Path,
+    db: Database,
+    rlbot_botpack: bool = False,
+    overrides: dict[str, BotOverride] | None = None,
+) -> Bot:
     """Validate a single bot.toml with RLBot's parser, extract metadata
     including mode tags, then upsert into the DB.  Returns the Bot."""
     abs_path = toml_path.resolve()
@@ -120,11 +136,17 @@ def _register_bot(toml_path: Path, db: Database, rlbot_botpack: bool = False) ->
         if lp.exists():
             logo_path = str(lp)
 
-    # Mode tags — read [details].tags and map to our mode system
+    # Mode tags — read [details].tags (or the override) and map to our mode system
     raw_tags: list[str] = details.get("tags", [])
+    override = (overrides or {}).get(name)
+    if override is not None and override.tags is not None:
+        raw_tags = override.tags
+        logger.info("Using overridden tags for %s: %s", name, raw_tags)
     mode_set: set[str] = set()
     for tag in raw_tags:
         mapped = _TAG_TO_MODES.get(tag.lower().strip())
+        if override is not None and override.tags is not None and not mapped:
+            logger.warning("Unknown tag %r in bot_overrides for %s", tag, name)
         if mapped:
             for m in mapped.split(","):
                 mode_set.add(m)

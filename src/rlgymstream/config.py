@@ -79,9 +79,20 @@ class AnchoredRating:
 
 
 @dataclass
+class BotOverride:
+    """Per-bot overrides for metadata normally read from bot.toml.
+
+    *tags* replaces ``[details].tags`` (same vocabulary: "1v1", "2v2",
+    "3v3", "teamplay").  ``None`` keeps the bot.toml tags.
+    """
+    tags: list[str] | None = None
+
+
+@dataclass
 class AppConfig:
     bot_sources: list[BotSource] = field(default_factory=list)
     anchored_ratings: list[AnchoredRating] = field(default_factory=list)
+    bot_overrides: dict[str, BotOverride] = field(default_factory=dict)  # bot name → override
     db_path: Path = field(default_factory=lambda: Path("data/rlgymstream.db"))
     overlay_host: str = "127.0.0.1"
     overlay_port: int = 8080
@@ -152,6 +163,10 @@ class AppConfig:
             mu = 30.5
             sigma = 3.0
             # modes = ["1v1", "2v2"]  # optional: only anchor these modes (default: all)
+
+            # Override bot.toml metadata, keyed by bot name.
+            [bot_overrides."Dice"]
+            tags = ["1v1", "2v2"]            # replaces [details].tags
 
             # Standard-mode matchmaking uses Temperature-Controlled
             # Active Learning.  n_prior controls how much to trust the
@@ -229,6 +244,16 @@ class AppConfig:
                     sigma=float(anchor.get("sigma", 8.333333333333334)),
                     modes=anchor.get("modes", []),
                 ))
+
+            for bot_name, override in data.get("bot_overrides", {}).items():
+                tags = override.get("tags")
+                if tags is not None and not (
+                    isinstance(tags, list) and all(isinstance(t, str) for t in tags)
+                ):
+                    raise ValueError(
+                        f"bot_overrides.{bot_name}.tags must be a list of strings (in {path})"
+                    )
+                cfg.bot_overrides[bot_name] = BotOverride(tags=tags)
 
             # [twitch] section
             twitch = data.get("twitch", {})
