@@ -274,6 +274,32 @@ class Database:
                 losses += 1
         return wins, losses, draws
 
+    def get_matches_since_last_played(self, mode: str, bot_ids: list[int]) -> dict[int, int]:
+        """For each bot, how many *mode* matches have been played since its
+        last match in that mode (all of them if it has never played it).
+
+        Walks the match history backwards and stops once every bot is found.
+        """
+        remaining = set(bot_ids)
+        result: dict[int, int] = {}
+        scanned = 0
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT team_blue_ids || ',' || team_orange_ids FROM matches "
+                "WHERE mode=? ORDER BY id DESC",
+                (mode,),
+            )
+            for (ids,) in rows:
+                for bot_id in {int(x) for x in ids.split(",")} & remaining:
+                    result[bot_id] = scanned
+                    remaining.discard(bot_id)
+                scanned += 1
+                if not remaining:
+                    break
+        for bot_id in remaining:
+            result[bot_id] = scanned
+        return result
+
     def get_pairwise_h2h(self, mode: str) -> dict[tuple[int, int], tuple[int, int]]:
         """Return pairwise win counts for every bot pair in a mode.
 

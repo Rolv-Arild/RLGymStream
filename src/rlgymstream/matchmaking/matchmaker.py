@@ -9,6 +9,11 @@ High-variance (uncertain) matchups are naturally favoured.
 Solo-queue modes draw a few thousand random candidate matchups (with a
 random threshold for teammate evenness) and pick one weighted by how much
 its result would tell us about the ratings, raised to ``1/temperature``.
+
+Every match in both kinds of mode is built around one *featured* bot:
+usually drawn with weight 1 + (matches since it last played in the mode),
+sometimes (sigma priority) the least-calibrated bot.  This keeps bots whose
+matches are hard to make even (top and bottom of the leaderboard) playing.
 """
 
 from __future__ import annotations
@@ -78,8 +83,10 @@ def pick_match(
 ) -> MatchSetup | None:
     """Select bots for a match in the given mode.
 
-    *n_prior* and *temperature* tune standard modes; *solo_temperature*
-    and *solo_candidates* tune solo queue.
+    Every match is built around one bot (see _pick_featured_bot); the rest
+    of the match is chosen by the mode's weighting.  *n_prior* and
+    *temperature* tune standard modes; *solo_temperature* and
+    *solo_candidates* tune solo queue.
     Returns None if not enough bots are available.
     """
     all_bots = db.get_all_bots(enabled_only=True)
@@ -96,15 +103,44 @@ def pick_match(
         candidates = [m for m in STANDARD_MAPS if m != last_map] or STANDARD_MAPS
         chosen_map = random.choice(candidates)
 
-    _anchored = anchored_bot_ids or set()
+    featured = _pick_featured_bot(db, bots, mode, sigma_priority_chance, anchored_bot_ids or set())
 
     if mode.is_solo_queue:
-        return _solo_queue_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance, _anchored,
+        return _solo_queue_pick(db, bots, mode, team_size, chosen_map, featured,
                                 temperature=solo_temperature, n_candidates=solo_candidates)
     else:
-        return _standard_pick(db, bots, mode, team_size, chosen_map,
-                              sigma_priority_chance, _anchored,
+        return _standard_pick(db, bots, mode, team_size, chosen_map, featured,
                               n_prior=n_prior, temperature=temperature)
+
+
+def _pick_featured_bot(
+        db: Database,
+        bots: list[Bot],
+        mode: MatchMode,
+        sigma_priority_chance: float,
+        anchored_bot_ids: set[int],
+) -> Bot:
+    """Choose the bot the match must include.
+
+    With *sigma_priority_chance* probability it is the unanchored bot with
+    the highest sigma (ties: fewest games in this mode), to calibrate new
+    bots and slowly even out game counts.  Otherwise it is drawn with weight
+    1 + (matches in this mode since it last played one), so no bot sits out
+    for long, even when close matches for it are hard to find (e.g. the top
+    and bottom of the leaderboard).
+    """
+    unanchored = [b for b in bots if b.id not in anchored_bot_ids]
+    if unanchored and random.random() < sigma_priority_chance:
+        ratings = {b.id: db.get_rating(b.id, mode.value) for b in unanchored}
+        bot = max(unanchored, key=lambda b: (ratings[b.id].sigma, -ratings[b.id].matches_played))
+        logger.debug("Sigma priority: building the match around %s (sigma=%.2f)",
+                     bot.name, ratings[bot.id].sigma)
+        return bot
+
+    idle = db.get_matches_since_last_played(mode.value, [b.id for b in bots if b.id is not None])
+    bot = random.choices(bots, weights=[idle[b.id] + 1 for b in bots], k=1)[0]
+    logger.debug("Featured bot: %s (%d matches since it last played)", bot.name, idle[bot.id])
+    return bot
 
 
 # Maximum p*(1-p) is 0.25 (when p=0.5).  Used to normalise teammate evenness.
@@ -163,49 +199,32 @@ def _standard_pick(
         mode: MatchMode,
         team_size: int,
         map_name: str,
-        sigma_priority_chance: float,
-        anchored_bot_ids: set[int],
+        featured: Bot,
         n_prior: float = 1.0,
         temperature: float = 1.0,
 ) -> MatchSetup | None:
     """Standard mode: each team is one bot (duplicated to fill team_size).
 
-    Uses Temperature-Controlled Active Learning:
-      1. For every unique bot pair, compute the expected win probability
-         from OpenSkill and use it as a Beta prior (weighted by *n_prior*).
+    The *featured* bot plays; its opponent is chosen by Temperature-Controlled
+    Active Learning:
+      1. For every pair (featured, opponent), compute the expected win
+         probability from OpenSkill and use it as a Beta prior (weighted by
+         *n_prior*).
       2. Fold in empirical head-to-head wins/losses.
       3. Compute the resulting Beta variance — high variance means we're
          uncertain about the true win probability of this matchup.
       4. Raise variance to ``1/temperature`` to control exploration.
       5. Normalise into a probability distribution and sample one pair.
-
-    With *sigma_priority_chance* probability, only pairs that include
-    the highest-sigma (least-calibrated) bot are considered.
     """
     if len(bots) < 2:
         return None
 
     # Pre-compute ratings
     bot_ratings: dict[int, PlackettLuceRating] = {}
-    bot_sigmas: dict[int, float] = {}
-    bot_games: dict[int, int] = {}
     for bot in bots:
         assert bot.id is not None
         r = db.get_rating(bot.id, mode.value)
         bot_ratings[bot.id] = make_rating(r.mu, r.sigma)
-        bot_sigmas[bot.id] = r.sigma
-        bot_games[bot.id] = r.matches_played
-
-    # Sigma priority: restrict to pairs containing the highest-sigma bot
-    unanchored = [b for b in bots if b.id not in anchored_bot_ids]
-    use_sigma_priority = bool(unanchored) and random.random() < sigma_priority_chance
-    priority_bot = max(
-        unanchored,
-        key=lambda b: (bot_sigmas[b.id], -bot_games[b.id]),
-    ) if unanchored else None
-    if use_sigma_priority and priority_bot:
-        logger.debug("Sigma priority active: looking for %s (sigma=%.2f)",
-                     priority_bot.name, bot_sigmas[priority_bot.id])
 
     # Bulk h2h lookup — one pass through match history
     h2h = db.get_pairwise_h2h(mode.value)
@@ -219,10 +238,9 @@ def _standard_pick(
         for j in range(i + 1, len(bots)):
             a, b = bots[i], bots[j]
 
-            # When sigma priority is active, only keep pairs with the priority bot
-            if use_sigma_priority and priority_bot:
-                if a.id != priority_bot.id and b.id != priority_bot.id:
-                    continue
+            # Only pairs with the featured bot
+            if featured.id not in (a.id, b.id):
+                continue
 
             # 1. Expected win probability from OpenSkill
             probs = _os_model.predict_win(
@@ -257,7 +275,7 @@ def _standard_pick(
             weights.append(weight)
 
     if not pairs:
-        # Edge case: sigma priority filtered everything out
+        # Edge case: the featured bot isn't among *bots*
         a, b = random.sample(bots, 2)
         return MatchSetup(
             mode=mode,
@@ -287,18 +305,17 @@ def _solo_queue_pick(
         mode: MatchMode,
         team_size: int,
         map_name: str,
-        sigma_priority_chance: float,
-        anchored_bot_ids: set[int],
+        featured: Bot,
         temperature: float = 0.25,
         n_candidates: int = 3000,
 ) -> MatchSetup:
     """Solo-queue mode: duplicates allowed, but the two teams cannot be
     identical (same bots in the same quantities).
 
-    1. Draw *n_candidates* random matchups: every slot is an independent
-       random bot.  A draw is rejected if the teams are identical, if two
-       different teammates are too far apart in skill (see below), or if
-       sigma priority is active and the highest-sigma bot is missing.
+    1. Draw *n_candidates* random matchups: the *featured* bot goes in a
+       random slot and every other slot is an independent random bot.  A
+       draw is rejected if the teams are identical or if two different
+       teammates are too far apart in skill (see below).
     2. Score each candidate with information_score() and pick one with
        probability proportional to score ** (1 / temperature).
 
@@ -312,24 +329,12 @@ def _solo_queue_pick(
     bot_os: dict[int, PlackettLuceRating] = {}
     bot_mus: dict[int, float] = {}
     bot_vars: dict[int, float] = {}
-    bot_sigmas: dict[int, float] = {}
-    bot_games: dict[int, int] = {}
     for bot in bots:
         assert bot.id is not None
         r = db.get_rating(bot.id, mode.value)
         bot_os[bot.id] = make_rating(r.mu, r.sigma)
         bot_mus[bot.id] = r.mu
         bot_vars[bot.id] = r.sigma ** 2
-        bot_sigmas[bot.id] = r.sigma
-        bot_games[bot.id] = r.matches_played
-
-    # Break sigma ties by fewest games played
-    unanchored = [b for b in bots if b.id not in anchored_bot_ids]
-    priority_bot = max(unanchored, key=lambda b: (bot_sigmas[b.id], -bot_games[b.id])) if unanchored else None
-    use_sigma_priority = bool(unanchored) and random.random() < sigma_priority_chance
-    if use_sigma_priority and priority_bot:
-        logger.debug("Sigma priority (solo): looking for %s (sigma=%.2f)",
-                     priority_bot.name, bot_sigmas[priority_bot.id])
 
     # Precompute pairwise evenness between all bots for teammate checks.
     # pairwise_weight[(a,b)] = p*(1-p)/0.25  where p = predict_win([a],[b]).
@@ -359,13 +364,7 @@ def _solo_queue_pick(
         if sorted(b.id for b in blue) == sorted(b.id for b in orange):
             return False
         # No huge skill gaps within a team
-        if not (_teammates_even(blue, thresh) and _teammates_even(orange, thresh)):
-            return False
-        # Require the highest-sigma bot when sigma priority is active
-        if use_sigma_priority and priority_bot:
-            if all(b.id != priority_bot.id for b in blue + orange):
-                return False
-        return True
+        return _teammates_even(blue, thresh) and _teammates_even(orange, thresh)
 
     teammate_threshold = random.random()
     candidates: list[tuple[list[Bot], list[Bot]]] = []
@@ -375,6 +374,8 @@ def _solo_queue_pick(
             break
         blue = random.choices(bots, k=team_size)
         orange = random.choices(bots, k=team_size)
+        slot = random.randrange(2 * team_size)
+        (blue if slot < team_size else orange)[slot % team_size] = featured
         if _acceptable(blue, orange, teammate_threshold):
             candidates.append((blue, orange))
         else:
@@ -399,10 +400,10 @@ def _solo_queue_pick(
             map_name=map_name,
         )
 
-    # Fallback (should be unreachable): two distinct bots, one per team, so
-    # the teams can never be identical.
+    # Fallback (should be unreachable): the featured bot against another bot,
+    # one per team, so the teams can never be identical.
     logger.warning("Solo queue matchmaking found no candidates in %d draws; using fallback", _MAX_DRAWS)
-    a, b = random.sample(bots, 2)
+    a, b = featured, random.choice([x for x in bots if x.id != featured.id])
     return MatchSetup(
         mode=mode,
         team_blue=[a] * team_size,

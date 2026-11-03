@@ -157,3 +157,32 @@ def test_solo_mirrors_are_rare(db, make_bots):
 ])
 def test_format_map_name(raw, expected):
     assert format_map_name(raw) == expected
+
+
+def test_matches_since_last_played(db, make_bots, add_match):
+    a, b, c, d = make_bots("A", "B", "C", "D")
+    add_match("1v1", [a], [c], "blue")          # oldest
+    add_match("1v1", [a], [b], "blue")
+    add_match("2v2", [d, d], [b, b], "blue")    # other mode: ignored
+    add_match("1v1", [b], [a], "orange")        # newest
+    idle = db.get_matches_since_last_played("1v1", [a.id, b.id, c.id, d.id])
+    assert idle == {a.id: 0, b.id: 0, c.id: 2, d.id: 3}
+
+
+def test_featured_bot_is_drawn_by_time_out(db, make_bots, add_match):
+    a, b, c = make_bots("A", "B", "C")
+    for _ in range(9):
+        add_match("1v1", [a], [b], "blue")      # C has sat out 9 matches
+    picks = [matchmaker._pick_featured_bot(db, [a, b, c], MatchMode.ONES, 0.0, set()).id
+             for _ in range(1000)]
+    # Weights 1 + idle: A 1, B 1, C 10, so C is featured ~83% of the time.
+    assert 0.75 < picks.count(c.id) / len(picks) < 0.9
+
+
+@pytest.mark.parametrize("mode", [MatchMode.ONES, MatchMode.THREES, MatchMode.SOLO_THREES])
+def test_match_always_includes_featured_bot(db, make_bots, mode, monkeypatch):
+    bots = make_bots("A", "B", "C", "D", "E")
+    monkeypatch.setattr(matchmaker, "_pick_featured_bot", lambda *args: bots[3])
+    for _ in range(20):
+        setup = pick_match(db, mode, solo_candidates=100)
+        assert bots[3].id in {b.id for b in setup.team_blue + setup.team_orange}

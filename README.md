@@ -292,24 +292,30 @@ Uses [OpenSkill](https://openskill.me/en/stable/) with the
 
 ## Matchmaking
 
+Every match is built around one **featured bot**.  Usually it is drawn at
+random with weight `1 + matches since it last played in this mode`, so no
+bot sits out for long, even the top and bottom bots whose matches are hard
+to make even.  With `sigma_priority_chance` probability it is instead the
+non-anchored bot with the highest σ (most uncertain rating; ties go to the
+bot with the fewest games in the mode), which calibrates new bots and
+slowly evens out game counts.  The rest of the match is chosen as follows.
+
 **Standard modes** (1v1, 2v2, 3v3) use temperature-controlled active
-learning.  For every pair of bots, a Beta distribution is built from the
-OpenSkill win prediction (weighted by `matchmaker_n_prior`) plus their
-head-to-head record.  Each pair is picked with probability proportional to
+learning.  For every pair of the featured bot and a possible opponent, a
+Beta distribution is built from the OpenSkill win prediction (weighted by
+`matchmaker_n_prior`) plus their head-to-head record.  Each pair is picked with probability proportional to
 `variance ^ (1 / matchmaker_temperature)`, so matchups whose outcome is
 still uncertain are favoured.  Lower temperature = greedier.
 
-**Solo queue** draws `solo_matchmaker_candidates` (3000) random matchups,
-filling every slot with a random bot (the same bot may appear more than
-once).  A draw is rejected if both teams are identical, or if two different
-teammates are too far apart in skill: a teammate threshold is rolled once
-per match and squared every 1000 rejected draws.  Each candidate is scored
+**Solo queue** draws `solo_matchmaker_candidates` (3000) random matchups:
+the featured bot goes in a random slot and every other slot gets a random
+bot (the same bot may appear more than once).  A draw is rejected if both
+teams are identical, or if two different teammates are too far apart in
+skill: a teammate threshold is rolled once per match and squared every 1000
+rejected draws.  Each candidate is scored
 by the expected information its result gives about the ratings (highest
 for close matches between bots with uncertain ratings), and one is picked
 with probability proportional to `score ^ (1 / solo_matchmaker_temperature)`
 (0.25).  A bot on both teams cancels out of the score, so mirror-like
 matchups are rare without being forbidden.
 
-In both, with `sigma_priority_chance` probability the matchup must include
-the non-anchored bot with the highest σ (most uncertain rating) in the
-current mode.  This helps new or under-played bots get calibrated faster.
