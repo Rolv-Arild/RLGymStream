@@ -179,6 +179,44 @@ def test_featured_bot_is_drawn_by_time_out(db, make_bots, add_match):
     assert 0.75 < picks.count(c.id) / len(picks) < 0.9
 
 
+def test_settled_botpack_bots_are_featured_less(db, make_bots):
+    a, b, c = make_bots("A", "B", "C")
+    a.rlbot_botpack = b.rlbot_botpack = True
+    _set_rating(db, a, "1v1", sigma=2.5)    # botpack, settled → half weight
+    _set_rating(db, b, "1v1", sigma=5.0)    # botpack, still calibrating
+    _set_rating(db, c, "1v1", sigma=2.5)    # settled, not botpack
+    picks = Counter(matchmaker._pick_featured_bot(db, [a, b, c], MatchMode.ONES, 0.0, set(), 0.5).id
+                    for _ in range(2000))
+    # Weights A 0.5, B 1, C 1, so A is featured ~20% of the time.
+    assert 0.16 < picks[a.id] / 2000 < 0.24
+    assert 0.35 < picks[b.id] / 2000 < 0.45
+    assert 0.35 < picks[c.id] / 2000 < 0.45
+
+
+def test_zero_weight_settled_botpack_bots_are_never_featured(db, make_bots, add_match):
+    a, b, c = make_bots("A", "B", "C")
+    a.rlbot_botpack = True
+    for bot in (a, b, c):
+        _set_rating(db, bot, "1v1", sigma=2.5)  # all at the floor
+    for _ in range(50):
+        add_match("1v1", [b], [c], "blue")      # A has sat out 50 matches
+    # Sigma priority always on: A would win the fewest-games tie-break.
+    for chance in (0.0, 1.0):
+        picks = {matchmaker._pick_featured_bot(db, [a, b, c], MatchMode.ONES, chance, set(), 0.0).id
+                 for _ in range(200)}
+        assert a.id not in picks
+
+
+def test_zero_weight_falls_back_when_only_settled_botpack_bots(db, make_bots):
+    a, b = make_bots("A", "B")
+    for bot in (a, b):
+        bot.rlbot_botpack = True
+        _set_rating(db, bot, "1v1", sigma=2.5)
+    picks = {matchmaker._pick_featured_bot(db, [a, b], MatchMode.ONES, 0.0, set(), 0.0).id
+             for _ in range(200)}
+    assert picks == {a.id, b.id}
+
+
 @pytest.mark.parametrize("mode", [MatchMode.ONES, MatchMode.THREES, MatchMode.SOLO_THREES])
 def test_match_always_includes_featured_bot(db, make_bots, mode, monkeypatch):
     bots = make_bots("A", "B", "C", "D", "E")

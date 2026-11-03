@@ -104,6 +104,7 @@ class AppConfig:
     pre_match_delay: float = 15.0   # seconds to show pre-match screen
     leaderboard_delay: float = 15.0 # seconds to show leaderboard between matches
     sigma_priority_chance: float = 0.1  # chance to force highest-sigma bot into a match
+    settled_botpack_weight: float = 1.0  # featured-bot weight factor for RLBot botpack bots at minimum sigma (1 = off)
     mercy_goal_diff: int = 8            # end match early if goal diff reaches this
     matchmaker_n_prior: float = 1.0     # Beta prior weight for h2h matchmaking (standard modes)
     matchmaker_temperature: float = 1.0 # exploration/exploitation dial (lower = greedier)
@@ -204,6 +205,10 @@ class AppConfig:
                 cfg.leaderboard_delay = float(data["leaderboard_delay"])
             if "sigma_priority_chance" in data:
                 cfg.sigma_priority_chance = float(data["sigma_priority_chance"])
+            if "settled_botpack_weight" in data:
+                cfg.settled_botpack_weight = float(data["settled_botpack_weight"])
+                if cfg.settled_botpack_weight < 0:
+                    raise ValueError(f"settled_botpack_weight must be >= 0 (in {path})")
             if "mercy_goal_diff" in data:
                 cfg.mercy_goal_diff = int(data["mercy_goal_diff"])
             if "matchmaker_n_prior" in data:

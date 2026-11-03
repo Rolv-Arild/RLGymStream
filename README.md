@@ -60,6 +60,7 @@ post_match_delay = 15       # seconds to show in-game scoreboard after match
 pre_match_delay = 15        # seconds to show pre-match screen
 leaderboard_delay = 15      # seconds to show leaderboard between matches
 sigma_priority_chance = 0.1 # chance to require the most uncertain bot in a match (0.0–1.0)
+settled_botpack_weight = 1.0 # featured-bot weight factor for RLBot botpack bots at minimum σ (0 = never featured)
 mercy_goal_diff = 8         # end match early if goal difference reaches this
 mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 
@@ -295,7 +296,9 @@ Uses [OpenSkill](https://openskill.me/en/stable/) with the
 Every match is built around one **featured bot**.  Usually it is drawn at
 random with weight `1 + matches since it last played in this mode`, so no
 bot sits out for long, even the top and bottom bots whose matches are hard
-to make even.  With `sigma_priority_chance` probability it is instead the
+to make even.  RLBot botpack bots whose σ has reached the 2.5 floor have
+that weight multiplied by `settled_botpack_weight` (default 1, no effect;
+at 0 they are never featured, though they still fill other slots).  With `sigma_priority_chance` probability it is instead the
 non-anchored bot with the highest σ (most uncertain rating; ties go to the
 bot with the fewest games in the mode), which calibrates new bots and
 slowly evens out game counts.  The rest of the match is chosen as follows.

@@ -12,6 +12,7 @@ its result would tell us about the ratings, raised to ``1/temperature``.
 
 Every match in both kinds of mode is built around one *featured* bot:
 usually drawn with weight 1 + (matches since it last played in the mode),
+lowered for RLBot botpack bots whose rating has settled at minimum sigma,
 sometimes (sigma priority) the least-calibrated bot.  This keeps bots whose
 matches are hard to make even (top and bottom of the leaderboard) playing.
 """
@@ -32,7 +33,7 @@ from rlbot.utils.maps import STANDARD_MAPS
 from rlgymstream.config import MatchMode
 from rlgymstream.db.database import Database
 from rlgymstream.db.models import Bot
-from rlgymstream.matchmaking.ratings import make_rating, _model as _os_model
+from rlgymstream.matchmaking.ratings import MIN_SIGMA, make_rating, _model as _os_model
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ def pick_match(
         last_map: str | None = None,
         sigma_priority_chance: float = 0.0,
         anchored_bot_ids: set[int] | None = None,
+        settled_botpack_weight: float = 1.0,
         n_prior: float = 1.0,
         temperature: float = 1.0,
         solo_temperature: float = 0.25,
@@ -84,7 +86,8 @@ def pick_match(
     """Select bots for a match in the given mode.
 
     Every match is built around one bot (see _pick_featured_bot); the rest
-    of the match is chosen by the mode's weighting.  *n_prior* and
+    of the match is chosen by the mode's weighting.  *sigma_priority_chance*
+    and *settled_botpack_weight* tune the featured bot; *n_prior* and
     *temperature* tune standard modes; *solo_temperature* and
     *solo_candidates* tune solo queue.
     Returns None if not enough bots are available.
@@ -103,7 +106,8 @@ def pick_match(
         candidates = [m for m in STANDARD_MAPS if m != last_map] or STANDARD_MAPS
         chosen_map = random.choice(candidates)
 
-    featured = _pick_featured_bot(db, bots, mode, sigma_priority_chance, anchored_bot_ids or set())
+    featured = _pick_featured_bot(db, bots, mode, sigma_priority_chance, anchored_bot_ids or set(),
+                                  settled_botpack_weight)
 
     if mode.is_solo_queue:
         return _solo_queue_pick(db, bots, mode, team_size, chosen_map, featured,
@@ -119,6 +123,7 @@ def _pick_featured_bot(
         mode: MatchMode,
         sigma_priority_chance: float,
         anchored_bot_ids: set[int],
+        settled_botpack_weight: float = 1.0,
 ) -> Bot:
     """Choose the bot the match must include.
 
@@ -127,18 +132,31 @@ def _pick_featured_bot(
     bots and slowly even out game counts.  Otherwise it is drawn with weight
     1 + (matches in this mode since it last played one), so no bot sits out
     for long, even when close matches for it are hard to find (e.g. the top
-    and bottom of the leaderboard).
+    and bottom of the leaderboard).  RLBot botpack bots whose sigma has
+    reached the floor have that weight multiplied by
+    *settled_botpack_weight*, so they are featured less often.  At 0 they
+    are never featured (sigma priority skips them too) unless no other bot
+    supports the mode.
     """
+    ratings = {b.id: db.get_rating(b.id, mode.value) for b in bots}
+    # Anchored bots can sit below the floor, so compare with <=.
+    settled = {b.id for b in bots if b.rlbot_botpack and ratings[b.id].sigma <= MIN_SIGMA}
+    if settled_botpack_weight <= 0 and len(settled) < len(bots):
+        bots = [b for b in bots if b.id not in settled]
+
     unanchored = [b for b in bots if b.id not in anchored_bot_ids]
     if unanchored and random.random() < sigma_priority_chance:
-        ratings = {b.id: db.get_rating(b.id, mode.value) for b in unanchored}
         bot = max(unanchored, key=lambda b: (ratings[b.id].sigma, -ratings[b.id].matches_played))
         logger.debug("Sigma priority: building the match around %s (sigma=%.2f)",
                      bot.name, ratings[bot.id].sigma)
         return bot
 
     idle = db.get_matches_since_last_played(mode.value, [b.id for b in bots if b.id is not None])
-    bot = random.choices(bots, weights=[idle[b.id] + 1 for b in bots], k=1)[0]
+    weights = [(idle[b.id] + 1.0) * (max(settled_botpack_weight, 0.0) if b.id in settled else 1.0)
+               for b in bots]
+    if not any(weights):  # only settled botpack bots support this mode
+        weights = [idle[b.id] + 1.0 for b in bots]
+    bot = random.choices(bots, weights=weights, k=1)[0]
     logger.debug("Featured bot: %s (%d matches since it last played)", bot.name, idle[bot.id])
     return bot
 
