@@ -19,6 +19,11 @@ from rlgymstream.db.models import Bot
 
 logger = logging.getLogger(__name__)
 
+
+class BotTagError(ValueError):
+    """A bot has no mode tags, so we can't tell which modes it plays."""
+
+
 # Tags in [details].tags that we map to our mode system.
 _TAG_TO_MODES = {
     "1v1": "1v1",
@@ -37,9 +42,13 @@ def discover_bots(
     into the DB.  Bots no longer present in any source are disabled.
     *overrides* (bot name → BotOverride) replaces bot.toml metadata.
     Returns the full list of enabled bots after discovery.
+
+    Raises BotTagError, listing every offending bot, if any bot has no
+    mode tags.
     """
     overrides = overrides or {}
     found_names: set[str] = set()
+    tag_errors: list[str] = []
     for source in sources:
         root = source.path.resolve()
         if not root.exists():
@@ -53,8 +62,18 @@ def discover_bots(
                     toml_path, db, rlbot_botpack=source.rlbot_botpack, overrides=overrides
                 )
                 found_names.add(bot.name)
+            except BotTagError as exc:
+                tag_errors.append(str(exc))
             except Exception:
                 logger.warning("Skipping invalid bot config: %s", toml_path, exc_info=True)
+
+    if tag_errors:
+        raise BotTagError(
+            "Bots without mode tags (1v1, 2v2, 3v3, teamplay):\n  "
+            + "\n  ".join(tag_errors)
+            + '\nFix their bot.toml, or add e.g. [bot_overrides."<name>"] '
+            'tags = ["1v1", "2v2", "3v3"] to rlgymstream.toml.'
+        )
 
     for name in overrides.keys() - found_names:
         logger.warning("Bot override names a bot that was not found: %s", name)
@@ -139,17 +158,23 @@ def _register_bot(
     # Mode tags — read [details].tags (or the override) and map to our mode system
     raw_tags: list[str] = details.get("tags", [])
     override = (overrides or {}).get(name)
+    tag_source = str(abs_path)
     if override is not None and override.tags is not None:
         raw_tags = override.tags
+        tag_source = "bot_overrides in rlgymstream.toml"
         logger.info("Using overridden tags for %s: %s", name, raw_tags)
-    mode_set: set[str] = set()
+    mode_tags: set[str] = set()
     for tag in raw_tags:
-        mapped = _TAG_TO_MODES.get(tag.lower().strip())
-        if override is not None and override.tags is not None and not mapped:
+        tag = tag.lower().strip()
+        if tag in _TAG_TO_MODES:
+            mode_tags.add(tag)
+        elif tag_source != str(abs_path):
             logger.warning("Unknown tag %r in bot_overrides for %s", tag, name)
-        if mapped:
-            for m in mapped.split(","):
-                mode_set.add(m)
+    if not mode_tags:
+        raise BotTagError(f"{name}: no mode tags ({tag_source})")
+    mode_set: set[str] = set()
+    for tag in mode_tags:
+        mode_set.update(_TAG_TO_MODES[tag].split(","))
     supported_modes = ",".join(sorted(mode_set))  # e.g. "1v1,2v2,3v3"
 
     bot = Bot(

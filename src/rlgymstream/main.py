@@ -20,7 +20,7 @@ import uvicorn
 from rlgymstream.config import AppConfig, MatchMode
 from rlgymstream.db.database import Database
 from rlgymstream.db.models import Match as MatchModel, MatchPlayerStats
-from rlgymstream.match.bot_discovery import discover_bots
+from rlgymstream.match.bot_discovery import BotTagError, discover_bots
 from rlgymstream.match.launcher import MatchLauncher
 from rlgymstream.matchmaking.matchmaker import MatchSetup, pick_match, pick_mode
 from rlgymstream.matchmaking.ratings import get_leaderboard, update_ratings, predict_win_probability, configure_defaults
@@ -66,7 +66,11 @@ async def run(config: AppConfig) -> None:
     launcher = MatchLauncher(config)
 
     # Discover bots
-    bots = discover_bots(config.bot_sources, db, config.bot_overrides)
+    try:
+        bots = discover_bots(config.bot_sources, db, config.bot_overrides)
+    except BotTagError as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
     logger.info("Found %d enabled bot(s)", len(bots))
     if not bots:
         logger.error(
@@ -178,7 +182,9 @@ async def run(config: AppConfig) -> None:
                                sigma_priority_chance=config.sigma_priority_chance,
                                anchored_bot_ids=anchored_bot_ids.get(mode.value, set()),
                                n_prior=config.matchmaker_n_prior,
-                               temperature=config.matchmaker_temperature)
+                               temperature=config.matchmaker_temperature,
+                               solo_temperature=config.solo_matchmaker_temperature,
+                               solo_candidates=config.solo_matchmaker_candidates)
             if setup is None:
                 logger.warning(
                     "Not enough bots for %s (need %d, have %d), skipping…",

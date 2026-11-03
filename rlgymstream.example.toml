@@ -16,6 +16,13 @@ mercy_goal_diff = 8           # end match early if goal difference reaches this
 matchmaker_n_prior = 1.0
 matchmaker_temperature = 1.0
 
+# Solo-queue matchmaking: draws random candidate matchups and picks one
+# weighted by how much its result would teach the ratings.
+# temperature: lower = closer, less varied matchups (0.25 = a good mix)
+# candidates: matchups scored per pick (more = closer to the ideal weighting)
+solo_matchmaker_temperature = 0.25
+solo_matchmaker_candidates = 3000
+
 # Modes to rotate through.  Options: "1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"
 mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 
@@ -82,7 +89,9 @@ mode_rotation = ["1v1", "2v2", "3v3", "solo_2v2", "solo_3v3"]
 # Override metadata from a bot's bot.toml, keyed by bot name. Useful for
 # bots you don't control (e.g. the RLBot botpack). "tags" replaces
 # [details].tags, with the same vocabulary: "1v1", "2v2", "3v3", and
-# "teamplay" (2v2 + 3v3). No mode tags at all means every mode.
+# "teamplay" (2v2 + 3v3). The stream won't start if a bot has no mode
+# tags; add them here. Also use this for a "teamplay" bot that can't
+# play both 2v2 and 3v3.
 # Restart to apply; overrides naming a missing bot log a warning.
 #
 # [bot_overrides."Dice"]

@@ -106,7 +106,8 @@ tags = ["1v1", "teamplay"]   # teamplay → 2v2 + 3v3
 ```
 
 Recognised tags: `1v1`, `2v2`, `3v3`, `teamplay` (implies 2v2 + 3v3).
-Bots with no tags are assumed to support all modes.
+The stream refuses to start if a bot has no mode tags (it then lists the
+bots to fix).
 Bots only appear on leaderboards for modes they support.
 
 To change the tags of a bot you don't control, add an override to
@@ -252,7 +253,7 @@ src/rlgymstream/
 │   ├── bot_discovery.py          # Multi-source scanning + RLBot validation + tag parsing
 │   └── launcher.py               # Reusable MatchManager, packet polling, mercy rule
 ├── matchmaking/
-│   ├── matchmaker.py             # Accept/reject matchmaking, sigma priority, map rotation
+│   ├── matchmaker.py             # Active-learning matchmaking, sigma priority, map rotation
 │   └── ratings.py                # OpenSkill PlackettLuce wrapper, cross-team duplicate handling
 ├── chat/
 │   ├── __main__.py               # Standalone chatbot entry point (python -m rlgymstream.chat)
@@ -298,12 +299,16 @@ head-to-head record.  Each pair is picked with probability proportional to
 `variance ^ (1 / matchmaker_temperature)`, so matchups whose outcome is
 still uncertain are favoured.  Lower temperature = greedier.
 
-**Solo queue** uses accept/reject sampling.  A random threshold is rolled
-once per match, then random matchups are generated until one has
-`p × (1 − p) / 0.25 ≥ threshold` (where `p` is the predicted win
-probability for one side).  A second threshold limits skill gaps between
-teammates.  Every 1000 failed attempts both thresholds are squared to
-guarantee convergence.
+**Solo queue** draws `solo_matchmaker_candidates` (3000) random matchups,
+filling every slot with a random bot (the same bot may appear more than
+once).  A draw is rejected if both teams are identical, or if two different
+teammates are too far apart in skill: a teammate threshold is rolled once
+per match and squared every 1000 rejected draws.  Each candidate is scored
+by the expected information its result gives about the ratings (highest
+for close matches between bots with uncertain ratings), and one is picked
+with probability proportional to `score ^ (1 / solo_matchmaker_temperature)`
+(0.25).  A bot on both teams cancels out of the score, so mirror-like
+matchups are rare without being forbidden.
 
 In both, with `sigma_priority_chance` probability the matchup must include
 the non-anchored bot with the highest σ (most uncertain rating) in the

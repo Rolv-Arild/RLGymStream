@@ -107,6 +107,8 @@ class AppConfig:
     mercy_goal_diff: int = 8            # end match early if goal diff reaches this
     matchmaker_n_prior: float = 1.0     # Beta prior weight for h2h matchmaking (standard modes)
     matchmaker_temperature: float = 1.0 # exploration/exploitation dial (lower = greedier)
+    solo_matchmaker_temperature: float = 0.25  # solo queue: lower = closer, less varied matchups
+    solo_matchmaker_candidates: int = 3000     # solo queue: random matchups scored per pick
     default_mu: dict[str, float] = field(default_factory=lambda: {})   # mode → starting mu (fallback: 25.0)
     default_sigma: dict[str, float] = field(default_factory=lambda: {})  # mode → starting sigma (fallback: 25/3)
     twitch_channel: str = ""      # Twitch channel name to join (empty = chatbot disabled)
@@ -173,6 +175,11 @@ class AppConfig:
             # OpenSkill prior; temperature controls exploration.
             matchmaker_n_prior = 1.0
             matchmaker_temperature = 1.0
+
+            # Solo queue picks among random candidate matchups, weighted by
+            # how much the result would teach the ratings.
+            solo_matchmaker_temperature = 0.25
+            solo_matchmaker_candidates = 3000
         """
         path = Path(path)
         cfg = cls()
@@ -203,6 +210,10 @@ class AppConfig:
                 cfg.matchmaker_n_prior = float(data["matchmaker_n_prior"])
             if "matchmaker_temperature" in data:
                 cfg.matchmaker_temperature = float(data["matchmaker_temperature"])
+            if "solo_matchmaker_temperature" in data:
+                cfg.solo_matchmaker_temperature = float(data["solo_matchmaker_temperature"])
+            if "solo_matchmaker_candidates" in data:
+                cfg.solo_matchmaker_candidates = int(data["solo_matchmaker_candidates"])
             if "stats_api_port" in data:
                 cfg.stats_api_port = int(data["stats_api_port"])
             if "stats_api_rate" in data:

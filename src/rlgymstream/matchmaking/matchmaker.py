@@ -6,16 +6,20 @@ possible pair, a Beta distribution is formed from the OpenSkill prior
 Beta variance is raised to ``1/temperature`` to give a selection weight.
 High-variance (uncertain) matchups are naturally favoured.
 
-Solo-queue modes use accept/reject sampling with a random threshold for
-match evenness and a separate threshold for teammate evenness.
+Solo-queue modes draw a few thousand random candidate matchups (with a
+random threshold for teammate evenness) and pick one weighted by how much
+its result would tell us about the ratings, raised to ``1/temperature``.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import random
 import re
+from collections import Counter
 from dataclasses import dataclass
+from statistics import NormalDist
 
 from openskill.models.weng_lin.plackett_luce import PlackettLuceRating
 from rlbot.utils.maps import STANDARD_MAPS
@@ -69,9 +73,13 @@ def pick_match(
         anchored_bot_ids: set[int] | None = None,
         n_prior: float = 1.0,
         temperature: float = 1.0,
+        solo_temperature: float = 0.25,
+        solo_candidates: int = 3000,
 ) -> MatchSetup | None:
     """Select bots for a match in the given mode.
 
+    *n_prior* and *temperature* tune standard modes; *solo_temperature*
+    and *solo_candidates* tune solo queue.
     Returns None if not enough bots are available.
     """
     all_bots = db.get_all_bots(enabled_only=True)
@@ -91,20 +99,62 @@ def pick_match(
     _anchored = anchored_bot_ids or set()
 
     if mode.is_solo_queue:
-        return _solo_queue_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance, _anchored)
+        return _solo_queue_pick(db, bots, mode, team_size, chosen_map, sigma_priority_chance, _anchored,
+                                temperature=solo_temperature, n_candidates=solo_candidates)
     else:
         return _standard_pick(db, bots, mode, team_size, chosen_map,
                               sigma_priority_chance, _anchored,
                               n_prior=n_prior, temperature=temperature)
 
 
-# Maximum p*(1-p) is 0.25 (when p=0.5).  Used to normalise accept probability.
+# Maximum p*(1-p) is 0.25 (when p=0.5).  Used to normalise teammate evenness.
 _MAX_WEIGHT = 0.25
-# Solo queue: thresholds are squared every _RELAX_EVERY failed attempts
-# (e.g. 0.99 → ~0.00003 after 10 squarings).  If no matchup is accepted
-# within _MAX_RETRIES, a simple valid fallback matchup is used.
+# Solo queue: the teammate threshold is squared every _RELAX_EVERY rejected
+# draws (e.g. 0.99 → ~0.00003 after 10 squarings).  If no candidate is found
+# within _MAX_DRAWS draws, a simple valid fallback matchup is used.
 _RELAX_EVERY = 1000
-_MAX_RETRIES = 20_000
+_MAX_DRAWS = 1_000_000
+# Per-player performance variance of the rating model, and the constant of
+# the information approximation (Houlsby et al. 2011): pi * ln(2) / 2.
+_PERF_VAR = _os_model.beta ** 2
+_INFO_C2 = math.pi * math.log(2) / 2
+_NORMAL_CDF = NormalDist().cdf
+
+
+def _binary_entropy(p: float) -> float:
+    if p <= 0.0 or p >= 1.0:
+        return 0.0
+    return -(p * math.log2(p) + (1 - p) * math.log2(1 - p))
+
+
+def information_score(
+        blue_ids: list[int],
+        orange_ids: list[int],
+        mu: dict[int, float],
+        var: dict[int, float],
+) -> float:
+    """Expected information (bits) the match result gives about the ratings.
+
+    The teams' performance difference is modelled as Gaussian.  Each bot
+    enters with its net count k = (copies on blue) - (copies on orange):
+    its skill adds k*mu to the mean and |k|*sigma^2 to the rating
+    uncertainty (each slot counted once).  A bot on both teams cancels out,
+    so the result says nothing about it.  Game-to-game luck adds beta^2 per
+    player.
+
+    The score is the uncertainty of the result minus the uncertainty that
+    would remain if the ratings were known exactly, so it is highest for
+    close matches between bots with uncertain ratings.
+    """
+    net = Counter(blue_ids)
+    net.subtract(orange_ids)
+    noise = (len(blue_ids) + len(orange_ids)) * _PERF_VAR
+    m = sum(k * mu[b] for b, k in net.items()) / math.sqrt(noise)
+    v = sum(abs(k) * var[b] for b, k in net.items()) / noise
+    p_blue = _NORMAL_CDF(m / math.sqrt(1 + v))
+    remaining = math.sqrt(_INFO_C2 / (v + _INFO_C2)) * math.exp(-m * m / (2 * (v + _INFO_C2)))
+    # The approximation can dip just below zero for very lopsided matches.
+    return max(_binary_entropy(p_blue) - remaining, 1e-12)
 
 
 def _standard_pick(
@@ -239,28 +289,37 @@ def _solo_queue_pick(
         map_name: str,
         sigma_priority_chance: float,
         anchored_bot_ids: set[int],
+        temperature: float = 0.25,
+        n_candidates: int = 3000,
 ) -> MatchSetup:
     """Solo-queue mode: duplicates allowed, but the two teams cannot be
     identical (same bots in the same quantities).
 
-    Uses roll-once accept/reject sampling — a random threshold is chosen
-    once, then matchups are generated until one has p*(1-p)/0.25 ≥ threshold.
-    Every 1000 failed attempts the threshold is squared to ensure convergence.
+    1. Draw *n_candidates* random matchups: every slot is an independent
+       random bot.  A draw is rejected if the teams are identical, if two
+       different teammates are too far apart in skill (see below), or if
+       sigma priority is active and the highest-sigma bot is missing.
+    2. Score each candidate with information_score() and pick one with
+       probability proportional to score ** (1 / temperature).
 
-    A separate *teammate* threshold is also rolled: within each team, every
-    pair of distinct bots must have pairwise p*(1-p)/0.25 ≥ teammate_threshold.
-    This prevents extreme skill gaps within a team.
+    The *teammate* threshold is rolled once per match: within each team,
+    every pair of distinct bots must have pairwise p*(1-p)/0.25 ≥ it.  It is
+    squared every _RELAX_EVERY rejected draws so candidates always fill up.
 
-    With *sigma_priority_chance* probability, an additional criterion is
-    applied: the matchup must also include the highest-sigma bot.
+    Bots on both teams cancel out in the score, so mirror-like matchups are
+    rare without being ruled out.
     """
     bot_os: dict[int, PlackettLuceRating] = {}
+    bot_mus: dict[int, float] = {}
+    bot_vars: dict[int, float] = {}
     bot_sigmas: dict[int, float] = {}
     bot_games: dict[int, int] = {}
     for bot in bots:
         assert bot.id is not None
         r = db.get_rating(bot.id, mode.value)
         bot_os[bot.id] = make_rating(r.mu, r.sigma)
+        bot_mus[bot.id] = r.mu
+        bot_vars[bot.id] = r.sigma ** 2
         bot_sigmas[bot.id] = r.sigma
         bot_games[bot.id] = r.matches_played
 
@@ -295,49 +354,54 @@ def _solo_queue_pick(
                     return False
         return True
 
-    threshold = random.random()
-    teammate_threshold = random.random()
-    for attempt in range(_MAX_RETRIES):
-        if attempt > 0 and attempt % _RELAX_EVERY == 0:
-            threshold *= threshold
-            teammate_threshold *= teammate_threshold
-
-        blue = random.choices(bots, k=team_size)
-        orange = random.choices(bots, k=team_size)
-
+    def _acceptable(blue: list[Bot], orange: list[Bot], thresh: float) -> bool:
         # Reject if teams are identical (same bots in same quantities)
         if sorted(b.id for b in blue) == sorted(b.id for b in orange):
-            continue
-
-        # Check teammate evenness — no huge skill gaps within a team
-        if not _teammates_even(blue, teammate_threshold):
-            continue
-        if not _teammates_even(orange, teammate_threshold):
-            continue
-
-        # Additionally require the highest-sigma bot when active
+            return False
+        # No huge skill gaps within a team
+        if not (_teammates_even(blue, thresh) and _teammates_even(orange, thresh)):
+            return False
+        # Require the highest-sigma bot when sigma priority is active
         if use_sigma_priority and priority_bot:
-            all_ids = {b.id for b in blue} | {b.id for b in orange}
-            if priority_bot.id not in all_ids:
-                continue
+            if all(b.id != priority_bot.id for b in blue + orange):
+                return False
+        return True
 
-        # Accept/reject based on match evenness
-        blue_ratings = [bot_os[b.id] for b in blue]
-        orange_ratings = [bot_os[b.id] for b in orange]
-        probs = _os_model.predict_win([blue_ratings, orange_ratings])
-        p = probs[0]
-        weight = p * (1 - p)
-        if weight / _MAX_WEIGHT >= threshold:
-            return MatchSetup(
-                mode=mode,
-                team_blue=blue,
-                team_orange=orange,
-                map_name=map_name,
-            )
+    teammate_threshold = random.random()
+    candidates: list[tuple[list[Bot], list[Bot]]] = []
+    rejected = 0
+    for _ in range(_MAX_DRAWS):
+        if len(candidates) >= n_candidates:
+            break
+        blue = random.choices(bots, k=team_size)
+        orange = random.choices(bots, k=team_size)
+        if _acceptable(blue, orange, teammate_threshold):
+            candidates.append((blue, orange))
+        else:
+            rejected += 1
+            if rejected % _RELAX_EVERY == 0:
+                teammate_threshold *= teammate_threshold
+
+    if candidates:
+        scores = [
+            information_score([b.id for b in blue], [b.id for b in orange], bot_mus, bot_vars)
+            for blue, orange in candidates
+        ]
+        # Normalise first so a low temperature can't underflow every weight to 0.
+        top = max(scores)
+        inv_temp = 1.0 / max(temperature, 1e-9)
+        weights = [(s / top) ** inv_temp for s in scores]
+        blue, orange = random.choices(candidates, weights=weights, k=1)[0]
+        return MatchSetup(
+            mode=mode,
+            team_blue=blue,
+            team_orange=orange,
+            map_name=map_name,
+        )
 
     # Fallback (should be unreachable): two distinct bots, one per team, so
     # the teams can never be identical.
-    logger.warning("Solo queue matchmaking exhausted %d attempts; using fallback", _MAX_RETRIES)
+    logger.warning("Solo queue matchmaking found no candidates in %d draws; using fallback", _MAX_DRAWS)
     a, b = random.sample(bots, 2)
     return MatchSetup(
         mode=mode,
