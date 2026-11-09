@@ -59,6 +59,7 @@ class OverlayLeaderboardEntry:
     matches_played: int = 0
     anchored: bool = False
     rlbot_botpack: bool = False
+    settled: bool = True  # sigma at the floor (or anchored); False shows a "?"
 
 
 @dataclass

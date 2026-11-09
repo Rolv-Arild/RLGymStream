@@ -133,6 +133,7 @@ class OverlayStateProxy:
                         matches_played=e.get("matches_played", 0),
                         anchored=e.get("anchored", False),
                         rlbot_botpack=e.get("rlbot_botpack", False),
+                        settled=e.get("settled", True),
                     )
                     for e in entries
                 ]

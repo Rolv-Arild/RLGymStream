@@ -44,6 +44,19 @@
         .idle-lb-footer .rlbot-icon { height: 1.3em; margin: 0 2px 0 0; }
         .idle-lb-name { display: flex; align-items: center; }
         .idle-lb-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+        /* Rating still settling (sigma above the floor): small raised "?" after the MMR.
+           Every row reserves room for it so the digits stay aligned. */
+        .idle-lb-mmr { padding-right: 0.75em; }
+        .lb-settling {
+            display: inline-block; width: 0; overflow: visible;   /* sits in the reserved padding */
+            margin-left: 0.12em; font-size: 0.8em; vertical-align: 0.2em; color: var(--text-dim);
+        }
+        .idle-lb-footer { line-height: 1.6; }
+        .idle-lb-footer .anchored-icon { font-size: 0.9em; margin: 0 2px 0 0; }
+        .idle-lb-footer .lb-settling-key {
+            font-family: 'Orbitron', sans-serif; font-size: 0.8em; vertical-align: 0.2em;
+            color: var(--text-dim); margin-right: 2px;
+        }
 
         /* ── Boost bar ── */
         .boost-bar-container {
@@ -565,6 +578,7 @@ function _initLayers() {
 function _showLayer(el, displayValue) {
     el.style.display = displayValue;
     void el.offsetHeight;
+    if (el === _layers.idle) shrinkLeaderboardToFit(el);   // measurable only once shown
     el.style.opacity = "1";
 }
 
@@ -620,6 +634,7 @@ window.renderState = function(state) {
         for (const el of newLayers) {
             el.style.transition = "none";
             el.style.display = "flex";
+            if (el === _layers.idle) shrinkLeaderboardToFit(el);   // measurable only once shown
             el.style.opacity = "1";
             el.style.zIndex = "1";
         }
@@ -1325,10 +1340,16 @@ function renderIdleLeaderboard(state, el) {
     };
     const totalMatches = state.total_matches || 0;
 
-    const anyRlbot = modes.some(mk => (boards[mk] || []).some(e => e.rlbot_botpack));
-    const rlbotNote = anyRlbot
-        ? ` &ensp;·&ensp; <img class="rlbot-icon" src="/static/rlbot.svg" alt="RLBot"> in the RLBot botpack — play it yourself`
-        : "";
+    const anyEntry = test => modes.some(mk => (boards[mk] || []).some(test));
+    // Second footer line: a key to the markers shown on the rows
+    const legend = [
+        anyEntry(e => e.anchored)
+            ? `<span class="anchored-icon">📌</span> Pinned ratings are based on estimates of human MMR` : "",
+        anyEntry(e => e.settled === false)
+            ? `<span class="lb-settling-key">?</span> rating still settling` : "",
+        anyEntry(e => e.rlbot_botpack)
+            ? `<img class="rlbot-icon" src="/static/rlbot.svg" alt="RLBot"> in the RLBot botpack — play it yourself` : "",
+    ].filter(Boolean).join(" &ensp;·&ensp; ");
 
     const maxEntries = Math.max(...modes.map(mk => (boards[mk] || []).length));
     const availableHeight = 842;
@@ -1348,7 +1369,7 @@ function renderIdleLeaderboard(state, el) {
                     <div class="idle-lb-name"><span class="idle-lb-name-text">${escapeHtml(e.bot_name)}</span>${rlbotIcon(e)}</div>
                     <div class="idle-lb-games">${e.matches_played} game${e.matches_played !== 1 ? "s" : ""}</div>
                 </div>
-                <div class="idle-lb-mmr">${anchorIcon(e)}${formatMMR(e.mmr)}</div>
+                <div class="idle-lb-mmr">${anchorIcon(e)}${formatMMR(e.mmr)}${settlingIcon(e)}</div>
             </div>`;
         }).join("");
 
@@ -1370,10 +1391,34 @@ function renderIdleLeaderboard(state, el) {
                 ${columns}
             </div>
             <div class="idle-lb-footer">
-                ${totalMatches} match${totalMatches !== 1 ? "es" : ""} played &ensp;·&ensp; Bot MMR — does not reflect actual in-game rank &ensp;·&ensp; Pinned ratings are based on estimates of human MMR${rlbotNote}
+                <div>${totalMatches} match${totalMatches !== 1 ? "es" : ""} played &ensp;·&ensp; Bot MMR — does not reflect actual in-game rank</div>
+                ${legend ? `<div>${legend}</div>` : ""}
             </div>
         </div>`;
+    shrinkLeaderboardToFit(el);
 }
+
+// The row-height estimate above is only a starting point: shrink the rows
+// until every column fits.  Rows grow once the web fonts arrive, so this runs
+// again whenever fonts finish loading.
+function shrinkLeaderboardToFit(el) {
+    const container = el.querySelector(".idle-lb-container");
+    if (!container) return;
+    let scale = parseFloat(container.style.getPropertyValue("--lb-scale")) || 1;
+    for (let i = 0; i < 8; i++) {
+        const bodies = [...container.querySelectorAll(".idle-lb-col-body")].filter(b => b.clientHeight > 0);
+        if (bodies.length === 0) return;   // hidden: measured again when the layer is shown
+        const worst = Math.max(...bodies.map(b => b.scrollHeight / b.clientHeight));
+        if (worst <= 1.001) return;
+        scale /= worst;
+        container.style.setProperty("--lb-scale", scale);
+    }
+}
+// (document.fonts.ready resolves before any font has started loading, so
+// listen for each batch of loaded fonts instead.)
+document.fonts.addEventListener("loadingdone", () => {
+    if (_layers.idle) shrinkLeaderboardToFit(_layers.idle);
+});
 
 
 /* ── Utilities ─────────────────────────────────────────────── */
@@ -1381,6 +1426,9 @@ function rlbotIcon(obj) {
     return obj && obj.rlbot_botpack
         ? '<img class="rlbot-icon" src="/static/rlbot.svg" alt="RLBot" title="In the RLBot botpack — playable locally">'
         : "";
+}
+function settlingIcon(obj) {
+    return obj && obj.settled === false ? '<span class="lb-settling">?</span>' : "";
 }
 function anchorIcon(obj) {
     return obj && obj.anchored ? '<span class="anchored-icon" title="Anchored — rating does not change">📌&ensp;</span>' : "";

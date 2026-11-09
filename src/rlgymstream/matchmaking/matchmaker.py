@@ -33,7 +33,7 @@ from rlbot.utils.maps import STANDARD_MAPS
 from rlgymstream.config import MatchMode
 from rlgymstream.db.database import Database
 from rlgymstream.db.models import Bot
-from rlgymstream.matchmaking.ratings import MIN_SIGMA, make_rating, _model as _os_model
+from rlgymstream.matchmaking.ratings import is_settled, make_rating, _model as _os_model
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +139,8 @@ def _pick_featured_bot(
     supports the mode.
     """
     ratings = {b.id: db.get_rating(b.id, mode.value) for b in bots}
-    # Anchored bots can sit below the floor, so compare with <=.
-    settled = {b.id for b in bots if b.rlbot_botpack and ratings[b.id].sigma <= MIN_SIGMA}
+    # Anchored bots can sit below the floor; is_settled covers them too.
+    settled = {b.id for b in bots if b.rlbot_botpack and is_settled(ratings[b.id].sigma)}
     if settled_botpack_weight <= 0 and len(settled) < len(bots):
         bots = [b for b in bots if b.id not in settled]
 

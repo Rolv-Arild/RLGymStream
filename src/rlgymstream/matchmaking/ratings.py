@@ -15,6 +15,14 @@ _model = PlackettLuce()
 
 # Minimum sigma floor (matches Rocket League's minimum of 2.5).
 MIN_SIGMA = 2.5
+# A rating counts as settled within this of the floor: solo-queue updates for
+# a bot on both teams can leave sigma a hair above it (e.g. 2.5018).
+SETTLED_SIGMA_TOLERANCE = 0.01
+
+
+def is_settled(sigma: float) -> bool:
+    """True if a rating's sigma has (practically) reached the floor."""
+    return sigma <= MIN_SIGMA + SETTLED_SIGMA_TOLERANCE
 
 # Configurable per-mode defaults for new bots (set via configure_defaults).
 _DEFAULT_MU: dict[str, float] = {}

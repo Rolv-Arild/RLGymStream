@@ -112,3 +112,9 @@ def test_leaderboard_respects_supported_modes(db, make_bots):
     names_2v2 = [e["bot"].name for e in get_leaderboard(db, "2v2")]
     assert sorted(names_1v1) == ["All", "Ones"]
     assert names_2v2 == ["All"]
+
+
+@pytest.mark.parametrize("sigma, settled", [(1.84, True), (2.5, True), (2.5018, True), (2.52, False), (3.1, False)])
+def test_is_settled(sigma, settled):
+    from rlgymstream.matchmaking.ratings import is_settled
+    assert is_settled(sigma) is settled

@@ -290,6 +290,9 @@ Uses [OpenSkill](https://openskill.me/en/stable/) with the
   participate in matches (opponents are rated normally), but their own
   μ/σ never change.  Anchors can be global or per-mode.  They bypass
   the minimum σ floor.  Anchored bots are marked with 📌 in the overlay.
+- **Settling ratings** — on the leaderboard, a small raised `?` after the
+  MMR marks a bot whose σ is still above the 2.5 floor (within 0.01 counts
+  as settled).  Anchored bots never get one.
 
 ## Matchmaking
 

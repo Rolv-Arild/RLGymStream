@@ -193,6 +193,16 @@ def test_settled_botpack_bots_are_featured_less(db, make_bots):
     assert 0.35 < picks[c.id] / 2000 < 0.45
 
 
+def test_botpack_bot_a_hair_above_the_floor_counts_as_settled(db, make_bots):
+    a, b = make_bots("A", "B")
+    a.rlbot_botpack = True
+    _set_rating(db, a, "1v1", sigma=2.5018)   # left by a solo-queue style update
+    _set_rating(db, b, "1v1", sigma=2.5)
+    picks = {matchmaker._pick_featured_bot(db, [a, b], MatchMode.ONES, 0.0, set(), 0.0).id
+             for _ in range(100)}
+    assert picks == {b.id}
+
+
 def test_zero_weight_settled_botpack_bots_are_never_featured(db, make_bots, add_match):
     a, b, c = make_bots("A", "B", "C")
     a.rlbot_botpack = True

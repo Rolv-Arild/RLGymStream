@@ -23,7 +23,9 @@ from rlgymstream.db.models import Match as MatchModel, MatchPlayerStats
 from rlgymstream.match.bot_discovery import BotTagError, discover_bots
 from rlgymstream.match.launcher import MatchLauncher
 from rlgymstream.matchmaking.matchmaker import MatchSetup, pick_match, pick_mode
-from rlgymstream.matchmaking.ratings import get_leaderboard, update_ratings, predict_win_probability, configure_defaults
+from rlgymstream.matchmaking.ratings import (
+    configure_defaults, get_leaderboard, is_settled, predict_win_probability, update_ratings,
+)
 from rlgymstream.overlay.server import create_overlay_app
 from rlgymstream.overlay.state import (
     OverlayBotInfo,
@@ -535,6 +537,7 @@ def _refresh_leaderboards(
                 matches_played=entry["rating"].matches_played,
                 anchored=entry["bot"].id in mode_anchored,
                 rlbot_botpack=entry["bot"].rlbot_botpack,
+                settled=entry["bot"].id in mode_anchored or is_settled(entry["rating"].sigma),
             )
             for i, entry in enumerate(lb)
         ]
